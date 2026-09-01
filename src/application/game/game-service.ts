@@ -29,10 +29,15 @@ export class GameService {
       this.repository.listReadyCases(),
       this.repository.listGames(playerId),
     ]);
+    // 历史教程账本只服务于旧存档；新开调查始终只展示当前教程。
+    const visibleCases = cases.filter(
+      (caseItem) =>
+        caseItem.source !== "tutorial" || caseItem.id === tutorialCase.id,
+    );
     const caseTitleById = new Map(cases.map((caseItem) => [caseItem.id, caseItem.title]));
 
     return {
-      cases,
+      cases: visibleCases,
       sessions: sessions.map((session) => ({
         id: session.id,
         caseId: session.caseId,

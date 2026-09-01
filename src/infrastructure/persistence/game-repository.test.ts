@@ -191,6 +191,22 @@ describe("GameRepository", () => {
     ]);
   });
 
+  it("shows only the current tutorial when a legacy tutorial ledger remains", async () => {
+    const legacyTutorial = parseCaseArtifact({
+      ...tutorialCase,
+      id: "case_rainy_study_v2",
+      title: "雨夜书房（旧教程）",
+    });
+    const player = await repository.createAnonymousIdentity();
+    await repository.registerCase(legacyTutorial, "tutorial");
+
+    const lobby = await new GameService(repository).getLobby(player.playerId);
+
+    expect(lobby.cases.filter((caseItem) => caseItem.source === "tutorial")).toEqual([
+      expect.objectContaining({ id: "case_rainy_study", title: "雨夜书房" }),
+    ]);
+  });
+
   it("queues durable work and records model telemetry", async () => {
     const identity = await repository.createAnonymousIdentity();
     const jobId = await repository.enqueueJob({
