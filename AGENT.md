@@ -107,6 +107,7 @@ flowchart LR
 - `submitCaseReport()` 的结果和分数完全确定性。模型只可生成复盘措辞，失败时退回确定性反馈。
 - 提前结案仍只有一次机会：必须选择已解锁嫌疑人、引用至少两条已发现证据并写出不少于 10 个字的推理；动机、手法、完整证据链和时间线是加分/完整度项目，不是提前结案的前置条件。真凶正确即为 `solved`，错误指认仍不可撤回。
 - 未发现的证据、未发现的动机/手法、或尚未收齐必要证据链时提交的时间线都不能计分。
+- `getCaseReview()` 只在案件关闭后从“玩家视图”切换到“全案解密”：必须公开全部证据、客观事实、人物私密档案、全部证词与完整时间线；每条未取得证据还要返回确定性的取得入口、前置/解锁条件和可用于质询的证词。此数据绝不能进入 `getPlayerCaseView()`。
 - `model_runs` 记录模型、prompt hash、token 和成本；请求/回复本身属于调试敏感信息，不得出现在普通玩家视图或日志中。
 - 上帝模式接口先验证 session 归属；它只返回本局模型调用，外加该案件的无 session 生成记录，不能读取别人的 session 记录。
 
@@ -118,7 +119,7 @@ flowchart LR
 | `src/domain/case/case-validator.ts` | 发布门禁、泄露/注入/可解性校验 | `case-validator.test.ts`、生成 prompt |
 | `src/domain/case/case-solver.ts` | 唯一解与必要证据链 | `case-solver.test.ts` |
 | `src/domain/case/evidence-reachability.ts` | 固定点可达性 | unlock rule 与证据前置条件 |
-| `src/domain/game/game-runtime.ts` | 调查、对话落盘、提示、出示、结案、玩家投影 | `game-runtime.test.ts`、所有 action API |
+| `src/domain/game/game-runtime.ts` | 调查、对话落盘、提示、出示、结案、玩家投影与结案后全案解密 | `game-runtime.test.ts`、所有 action API |
 | `src/application/game/game-service.ts` | 将 API 输入接到 runtime 与仓储 | API schema、幂等参数 |
 | `src/infrastructure/persistence/game-repository.ts` | 玩家、案件、session、事件、命令、job、模型审计 | `game-repository.test.ts`、Drizzle schema |
 | `src/infrastructure/db/schema.ts` | Drizzle table 定义 | `drizzle/` migration |
@@ -245,6 +246,7 @@ docker compose up -d --build
 ### 修改 UI / 上帝模式
 
 - 普通玩家 API 只能拿 `getPlayerCaseView()`；不要直接将 `CaseArtifact` 送到前端。
+- 例外仅限已关闭案件的 `/review`：它必须来自 `getCaseReview()`，可完整公开本局真相与遗漏线索的确定性获取路线；绝不能在调查中提前调用或缓存到普通玩家视图。
 - 结案后所有可编辑控件（包括本地手记）都应只读/禁用。
 - 上帝模式快捷键是隐藏调试入口，但接口仍必须验证 session 所属玩家；弹层需有 dialog 语义、焦点处理和 Escape 关闭。
 
@@ -262,7 +264,7 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 pnpm worker:once
 ```
 
-若改了用户可见工作台，手动验证：大厅、教程开始、搜索/点击搜证、对话、出示证据、提示、提交一次报告、关闭后只读、上帝模式打开/关闭。
+若改了用户可见工作台，手动验证：大厅、教程开始、搜索/点击搜证、对话、出示证据、提示、提交一次报告、关闭后只读、全案解密（遗漏证据路线/人物秘密/全部证词）、上帝模式打开/关闭。
 
 高风险改动必须新增或更新测试：
 

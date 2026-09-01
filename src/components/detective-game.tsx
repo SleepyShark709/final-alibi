@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { CaseReview } from "@/domain/game/game-runtime";
 import { assignPortraits } from "@/ui/portraits";
 
 type Panel = "briefing" | "scene" | "dialogue" | "notebook" | "report" | "review";
@@ -126,21 +127,6 @@ interface GenerationJobView {
   maxAttempts: number;
   createdAt: string;
   updatedAt: string;
-}
-
-interface CaseReview {
-  culprit?: CharacterView & { privateProfile?: string };
-  motive?: { id: string; statement: string };
-  method?: { id: string; statement: string };
-  timeline: Array<{ id: string; timestamp: string; description: string }>;
-  lies: Array<{ id: string; speakerName: string; statement: string }>;
-  evidence: Array<{
-    id: string;
-    name: string;
-    description: string;
-    discovered: boolean;
-  }>;
-  report: ReportResult;
 }
 
 interface ReportDraft {
@@ -1644,6 +1630,10 @@ function ReviewPanel(props: {
   }
   const review = props.review;
   const completeDossier = reportHasCompleteDossier(review.report);
+  const missedEvidence = review.evidence.filter((evidence) => !evidence.discovered);
+  const discoveredButUnreported = review.evidence.filter(
+    (evidence) => evidence.discovered && !evidence.includedInReport,
+  );
   return (
     <div className="stage-panel review-panel">
       <div className="verdict-stamp">
@@ -1678,6 +1668,15 @@ function ReviewPanel(props: {
           <p>{review.method?.statement}</p>
         </div>
       </section>
+      <section className="report-feedback">
+        <span>FULL CASE DECLASSIFICATION / CASE CLOSED</span>
+        <h3>全案解密</h3>
+        <p>
+          案件已经封存，以下内容不再隐藏：完整真相、全部人物秘密、所有证词与全部取证路径。
+          本局共有 {review.evidence.length} 条证据，其中你未取得 {missedEvidence.length} 条；
+          已取得但没有写入报告的证据有 {discoveredButUnreported.length} 条。
+        </p>
+      </section>
       {review.report.feedback && (
         <section className="report-feedback">
           <span>AI REVIEW / 不参与评分</span>
@@ -1698,6 +1697,60 @@ function ReviewPanel(props: {
         </section>
       )}
       <section className="review-timeline">
+        <h3>全部证据与证明力</h3>
+        {review.evidence.map((evidence, index) => (
+          <article key={evidence.id}>
+            <time>E-{String(index + 1).padStart(2, "0")}</time>
+            <div>
+              <strong>{evidence.name} · {evidenceReviewStatus(evidence)}</strong>
+              <p>{evidence.description}</p>
+              {evidence.supportsFacts.length > 0 && (
+                <p>可证明：{evidence.supportsFacts.map((fact) => fact.statement).join("；")}</p>
+              )}
+              {evidence.contradictsClaims.length > 0 && (
+                <p>
+                  可拆穿：{evidence.contradictsClaims
+                    .map((claim) => `${claim.speakerName}“${claim.statement}”`)
+                    .join("；")}
+                </p>
+              )}
+            </div>
+          </article>
+        ))}
+      </section>
+      <section className="review-timeline">
+        <h3>遗漏线索：如何取得</h3>
+        {missedEvidence.length === 0 ? (
+          <p>你已取得本案全部证据。</p>
+        ) : (
+          missedEvidence.map((evidence, index) => (
+            <article key={evidence.id}>
+              <time>PATH {String(index + 1).padStart(2, "0")}</time>
+              <div>
+                <strong>{evidence.name}</strong>
+                {evidenceAcquisitionSteps(evidence).map((step, stepIndex) => (
+                  <p key={step}>第 {stepIndex + 1} 步：{step}</p>
+                ))}
+                {evidence.followUps.map((followUp) => (
+                  <p key={`${followUp.characterId}:${followUp.claimId ?? "truth"}`}>
+                    后续质询：{evidenceFollowUpText(followUp)}
+                  </p>
+                ))}
+              </div>
+            </article>
+          ))
+        )}
+      </section>
+      <section className="review-timeline">
+        <h3>客观事实总表</h3>
+        {review.facts.map((fact) => (
+          <article key={fact.id}>
+            <time>{factTypeLabel(fact.type)}</time>
+            <p>{fact.statement}</p>
+          </article>
+        ))}
+      </section>
+      <section className="review-timeline">
         <h3>真相时间线</h3>
         {review.timeline.map((event) => (
           <article key={event.id}>
@@ -1707,10 +1760,30 @@ function ReviewPanel(props: {
         ))}
       </section>
       <section className="review-lies">
-        <h3>谎言与隐瞒</h3>
-        {review.lies.map((lie) => (
-          <blockquote key={lie.id}>
-            “{lie.statement}” <cite>— {lie.speakerName}</cite>
+        <h3>人物秘密与谎言策略</h3>
+        {review.characters.map((character) => (
+          <blockquote key={character.id}>
+            <strong>{character.name} · {roleTierLabel(character.roleTier)}</strong>
+            <p>{character.privateProfile}</p>
+            {character.secrets.length > 0 && (
+              <p>隐藏事实：{character.secrets.map((fact) => fact.statement).join("；")}</p>
+            )}
+            {character.lieRules.map((rule) => (
+              <p key={`${rule.strategy}:${rule.fact.id}`}>
+                谎言策略（{lieStrategyLabel(rule.strategy)}）：围绕“{rule.fact.statement}”时会说“{rule.coverStatement}”
+              </p>
+            ))}
+          </blockquote>
+        ))}
+      </section>
+      <section className="review-lies">
+        <h3>全部证词与真实归属</h3>
+        {review.claims.map((claim) => (
+          <blockquote key={claim.id}>
+            “{claim.statement}” <cite>— {claim.speakerName} · {claimKindLabel(claim.kind)}</cite>
+            {claim.facts.length > 0 && (
+              <p>对应事实：{claim.facts.map((fact) => fact.statement).join("；")}</p>
+            )}
           </blockquote>
         ))}
       </section>
@@ -1944,8 +2017,112 @@ function reportRequirements(report: ReportDraft) {
   return missing;
 }
 
-function reportHasCompleteDossier(report: ReportResult) {
+function reportHasCompleteDossier<T extends object>(report: { correct: T }) {
   return Object.values(report.correct).every(Boolean);
+}
+
+function evidenceReviewStatus(evidence: CaseReview["evidence"][number]) {
+  if (!evidence.discovered) return "未取得";
+  if (!evidence.includedInReport) return "已取得，未写入报告";
+  return evidence.requiredForSolution ? "已取得并纳入关键卷宗" : "已取得并写入报告";
+}
+
+function evidenceAcquisitionSteps(evidence: CaseReview["evidence"][number]) {
+  const acquisition = evidence.acquisition;
+  const steps: string[] = [];
+  if (acquisition.prerequisiteEvidence.length > 0) {
+    steps.push(
+      `先取得前置证据：${acquisition.prerequisiteEvidence.map((item) => item.name).join("、")}。`,
+    );
+  }
+  for (const requirement of acquisition.unlockRequirements) {
+    const conditions = [
+      requirement.allEvidence.length > 0
+        ? `取得${requirement.allEvidence.map((item) => item.name).join("、")}`
+        : "",
+      requirement.anyEvidence.length > 0
+        ? `在${requirement.anyEvidence.map((item) => item.name).join("、")}中取得任意一条`
+        : "",
+    ].filter(Boolean);
+    if (conditions.length > 0) {
+      steps.push(`解锁${requirement.targetName}：${conditions.join("，并")}。`);
+    }
+  }
+  if (acquisition.character) {
+    steps.push(
+      `与${acquisition.character.name}对话，追问“${acquisition.primaryAction}”。`,
+    );
+  } else if (acquisition.scene && acquisition.object) {
+    steps.push(
+      `前往${acquisition.scene.name}，${acquisitionMethodLabel(acquisition.method)}${acquisition.object.name}；可直接描述“${acquisition.primaryAction}”。`,
+    );
+  } else if (acquisition.scene) {
+    steps.push(
+      `前往${acquisition.scene.name}，执行“${acquisition.primaryAction}”。`,
+    );
+  } else {
+    steps.push(`执行“${acquisition.primaryAction}”。`);
+  }
+  return [...new Set(steps)];
+}
+
+function evidenceFollowUpText(
+  followUp: CaseReview["evidence"][number]["followUps"][number],
+) {
+  if (followUp.claimStatement) {
+    return `带着该证据向${followUp.characterName}质询，可拆穿其“${followUp.claimStatement}”。`;
+  }
+  const factText = followUp.factStatements.join("；");
+  return factText
+    ? `带着该证据向${followUp.characterName}围绕“${factText}”继续质询。`
+    : `带着该证据向${followUp.characterName}继续质询。`;
+}
+
+function acquisitionMethodLabel(method: CaseReview["evidence"][number]["acquisition"]["method"]) {
+  return (
+    {
+      inspect: "检查",
+      search: "搜查",
+      analyze: "分析",
+      query: "查询",
+      interview: "询问",
+    }[method] ?? "调查"
+  );
+}
+
+function roleTierLabel(roleTier: CaseReview["characters"][number]["roleTier"]) {
+  return (
+    {
+      victim: "受害者",
+      suspect: "嫌疑人",
+      witness: "证人",
+      referenced: "关联人物",
+    }[roleTier] ?? roleTier
+  );
+}
+
+function lieStrategyLabel(
+  strategy: CaseReview["characters"][number]["lieRules"][number]["strategy"],
+) {
+  return (
+    {
+      deny: "否认",
+      deflect: "转移话题",
+      minimize: "淡化事实",
+      fabricate_cover: "编造不在场证明",
+    }[strategy] ?? strategy
+  );
+}
+
+function claimKindLabel(kind: CaseReview["claims"][number]["kind"]) {
+  return (
+    {
+      truth: "真实证词",
+      lie: "谎言",
+      mistaken: "误判",
+      withheld: "隐瞒",
+    }[kind] ?? kind
+  );
 }
 
 function formatDate(value: string) {

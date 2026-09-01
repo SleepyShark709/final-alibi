@@ -285,6 +285,83 @@ describe("deterministic game runtime", () => {
     expect(submitted.session.status).toBe("closed");
   });
 
+  it("fully declassifies missed evidence and its acquisition route after closure", () => {
+    const afterTea = performInvestigation(tutorialCase, newSession(), {
+      commandId: "command_debrief_tea",
+      text: "化验茶水",
+      sceneId: "scene_study",
+    }).session;
+    const afterBookend = performInvestigation(tutorialCase, afterTea, {
+      commandId: "command_debrief_bookend",
+      text: "检查黄铜书挡",
+      sceneId: "scene_study",
+    }).session;
+    const submitted = submitCaseReport(tutorialCase, afterBookend, {
+      commandId: "command_submit_debrief",
+      culpritId: tutorialCase.solution.culpritId,
+      motiveFactId: "",
+      methodFactId: "",
+      evidenceIds: ["evidence_teacup_residue", "evidence_brass_bookend"],
+      timelineEventIds: [],
+      reasoning: "两条物证都指向李闻舟，但我决定提前提交结论。",
+    });
+    const review = getCaseReview(tutorialCase, submitted.session);
+    const housekeeperTestimony = review?.evidence.find(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    );
+    const liWenzhou = review?.characters.find(
+      (character) => character.id === "character_li_wenzhou",
+    );
+    const liAlibi = review?.claims.find((claim) => claim.id === "claim_li_alibi");
+
+    expect({
+      evidenceCount: review?.evidence.length,
+      housekeeper: housekeeperTestimony,
+      liSecrets: liWenzhou?.secrets,
+      liLieRules: liWenzhou?.lieRules,
+      liAlibi,
+      factCount: review?.facts.length,
+    }).toMatchObject({
+      evidenceCount: tutorialCase.evidence.length,
+      housekeeper: {
+        discovered: false,
+        includedInReport: false,
+        requiredForSolution: true,
+        supportsFacts: [
+          expect.objectContaining({ id: "fact_housekeeper_sighting" }),
+        ],
+        acquisition: {
+          method: "interview",
+          character: expect.objectContaining({
+            id: "character_luo_fang",
+            name: "罗芳",
+          }),
+          primaryAction: "询问罗芳谁送了茶",
+          prerequisiteEvidence: [],
+        },
+        followUps: [
+          expect.objectContaining({
+            characterId: "character_li_wenzhou",
+            claimId: "claim_li_alibi",
+          }),
+        ],
+      },
+      liSecrets: expect.arrayContaining([
+        expect.objectContaining({ id: "fact_motive_embezzlement" }),
+      ]),
+      liLieRules: expect.arrayContaining([
+        expect.objectContaining({
+          fact: expect.objectContaining({ id: "fact_method_sedative_bookend" }),
+        }),
+      ]),
+      liAlibi: expect.objectContaining({
+        kind: "lie",
+        speakerName: "李闻舟",
+      }),
+      factCount: tutorialCase.facts.length,
+    });
+  });
+
   it("requires two discovered evidence items before an early accusation can close a case", () => {
     const afterTea = performInvestigation(tutorialCase, newSession(), {
       commandId: "command_early_one_evidence",

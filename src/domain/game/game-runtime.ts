@@ -200,6 +200,98 @@ export interface SubmitCaseReportOutcome {
   report: CaseReportResult;
 }
 
+/** 结案后向玩家公开的客观事实；调查中绝不能使用这个投影。 */
+export interface DeclassifiedFact {
+  id: string;
+  type: CaseArtifact["facts"][number]["type"];
+  statement: string;
+}
+
+export interface DeclassifiedClaim {
+  id: string;
+  speakerId: string;
+  speakerName: string;
+  kind: CaseArtifact["claims"][number]["kind"];
+  statement: string;
+  facts: DeclassifiedFact[];
+}
+
+export interface CaseReviewEvidenceReference {
+  id: string;
+  name: string;
+}
+
+export interface CaseReviewUnlockRequirement {
+  targetType: CaseArtifact["unlockRules"][number]["targetType"];
+  targetName: string;
+  allEvidence: CaseReviewEvidenceReference[];
+  anyEvidence: CaseReviewEvidenceReference[];
+}
+
+export interface CaseReviewAcquisition {
+  method: CaseArtifact["evidence"][number]["discovery"]["method"];
+  primaryAction: string;
+  scene?: { id: string; name: string };
+  object?: { id: string; name: string };
+  character?: { id: string; name: string; occupation: string };
+  prerequisiteEvidence: CaseReviewEvidenceReference[];
+  unlockRequirements: CaseReviewUnlockRequirement[];
+}
+
+export interface CaseReviewFollowUp {
+  characterId: string;
+  characterName: string;
+  claimId?: string;
+  claimStatement?: string;
+  factStatements: string[];
+}
+
+export interface DeclassifiedEvidence {
+  id: string;
+  name: string;
+  description: string;
+  kind: CaseArtifact["evidence"][number]["kind"];
+  critical: boolean;
+  discovered: boolean;
+  includedInReport: boolean;
+  requiredForSolution: boolean;
+  supportsFacts: DeclassifiedFact[];
+  contradictsClaims: DeclassifiedClaim[];
+  implicatesCharacters: Array<{ id: string; name: string }>;
+  excludesCharacters: Array<{ id: string; name: string }>;
+  acquisition: CaseReviewAcquisition;
+  followUps: CaseReviewFollowUp[];
+}
+
+export interface DeclassifiedCharacter {
+  id: string;
+  name: string;
+  roleTier: CaseArtifact["characters"][number]["roleTier"];
+  occupation: string;
+  publicProfile: string;
+  privateProfile: string;
+  secrets: DeclassifiedFact[];
+  lieRules: Array<{
+    strategy: CaseArtifact["characters"][number]["lieRules"][number]["strategy"];
+    coverStatement: string;
+    fact: DeclassifiedFact;
+  }>;
+}
+
+export interface CaseReview {
+  culprit?: CaseArtifact["characters"][number];
+  motive?: CaseArtifact["facts"][number];
+  method?: CaseArtifact["facts"][number];
+  facts: DeclassifiedFact[];
+  characters: DeclassifiedCharacter[];
+  claims: DeclassifiedClaim[];
+  timeline: CaseArtifact["timeline"];
+  lies: DeclassifiedClaim[];
+  evidence: DeclassifiedEvidence[];
+  playerEvents: GameEvent[];
+  report: CaseReportResult;
+}
+
 /** 为一个已冻结案件创建初始调查状态和 sequence 0 的开始事件。 */
 export function startGame(
   caseArtifact: CaseArtifact,
@@ -835,15 +927,56 @@ export function getPlayerCaseView(
   };
 }
 
-export function getCaseReview(caseArtifact: CaseArtifact, session: GameSession) {
+export function getCaseReview(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+): CaseReview | null {
   assertCaseMatches(caseArtifact, session);
   if (session.status !== "closed" || !session.report) {
     return null;
   }
+  const report = session.report;
   const characterNameById = new Map(
     caseArtifact.characters.map((character) => [character.id, character.name]),
   );
+  const characterById = new Map(
+    caseArtifact.characters.map((character) => [character.id, character]),
+  );
   const factById = new Map(caseArtifact.facts.map((fact) => [fact.id, fact]));
+  const evidenceById = new Map(
+    caseArtifact.evidence.map((evidence) => [evidence.id, evidence]),
+  );
+  const sceneById = new Map(caseArtifact.scenes.map((scene) => [scene.id, scene]));
+  const objectById = new Map(
+    caseArtifact.scenes
+      .flatMap((scene) => scene.objects)
+      .map((object) => [object.id, object]),
+  );
+  const facts = caseArtifact.facts.map((fact) => ({ ...fact }));
+  const claims = caseArtifact.claims.map((claim) =>
+    declassifyClaim(claim, characterNameById, factById),
+  );
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]));
+  const characters = caseArtifact.characters.map((character) =>
+    declassifyCharacter(character, factById),
+  );
+  const submittedEvidenceIds = new Set(report.submitted.evidenceIds);
+  const requiredEvidenceIds = new Set(caseArtifact.solution.requiredEvidenceIds);
+  const evidence = caseArtifact.evidence.map((item) =>
+    declassifyEvidence({
+      evidence: item,
+      caseArtifact,
+      session,
+      submittedEvidenceIds,
+      requiredEvidenceIds,
+      factById,
+      claimById,
+      characterById,
+      evidenceById,
+      sceneById,
+      objectById,
+    }),
+  );
 
   return {
     culprit: caseArtifact.characters.find(
@@ -851,20 +984,266 @@ export function getCaseReview(caseArtifact: CaseArtifact, session: GameSession) 
     ),
     motive: factById.get(caseArtifact.solution.motiveFactId),
     method: factById.get(caseArtifact.solution.methodFactId),
+    facts,
+    characters,
+    claims,
     timeline: caseArtifact.timeline,
-    lies: caseArtifact.claims
-      .filter((claim) => claim.kind === "lie")
-      .map((claim) => ({
-        ...claim,
-        speakerName: characterNameById.get(claim.speakerId) ?? claim.speakerId,
-      })),
-    evidence: caseArtifact.evidence.map((evidence) => ({
-      ...evidence,
-      discovered: session.discoveredEvidenceIds.includes(evidence.id),
-    })),
+    lies: claims.filter((claim) => claim.kind === "lie"),
+    evidence,
     playerEvents: session.events,
-    report: session.report,
+    report,
   };
+}
+
+function declassifyClaim(
+  claim: CaseArtifact["claims"][number],
+  characterNameById: ReadonlyMap<string, string>,
+  factById: ReadonlyMap<string, CaseArtifact["facts"][number]>,
+): DeclassifiedClaim {
+  return {
+    id: claim.id,
+    speakerId: claim.speakerId,
+    speakerName: characterNameById.get(claim.speakerId) ?? claim.speakerId,
+    kind: claim.kind,
+    statement: claim.statement,
+    facts: declassifyFacts(claim.factIds, factById),
+  };
+}
+
+function declassifyCharacter(
+  character: CaseArtifact["characters"][number],
+  factById: ReadonlyMap<string, CaseArtifact["facts"][number]>,
+): DeclassifiedCharacter {
+  return {
+    id: character.id,
+    name: character.name,
+    roleTier: character.roleTier,
+    occupation: character.occupation,
+    publicProfile: character.publicProfile,
+    privateProfile: character.privateProfile,
+    secrets: declassifyFacts(character.secretFactIds, factById),
+    lieRules: character.lieRules.flatMap((rule) => {
+      const fact = factById.get(rule.factId);
+      return fact
+        ? [
+            {
+              strategy: rule.strategy,
+              coverStatement: rule.coverStatement,
+              fact: { ...fact },
+            },
+          ]
+        : [];
+    }),
+  };
+}
+
+function declassifyEvidence(input: {
+  evidence: CaseArtifact["evidence"][number];
+  caseArtifact: CaseArtifact;
+  session: GameSession;
+  submittedEvidenceIds: ReadonlySet<string>;
+  requiredEvidenceIds: ReadonlySet<string>;
+  factById: ReadonlyMap<string, CaseArtifact["facts"][number]>;
+  claimById: ReadonlyMap<string, DeclassifiedClaim>;
+  characterById: ReadonlyMap<string, CaseArtifact["characters"][number]>;
+  evidenceById: ReadonlyMap<string, CaseArtifact["evidence"][number]>;
+  sceneById: ReadonlyMap<string, CaseArtifact["scenes"][number]>;
+  objectById: ReadonlyMap<
+    string,
+    CaseArtifact["scenes"][number]["objects"][number]
+  >;
+}): DeclassifiedEvidence {
+  const contradictoryClaims = input.evidence.contradictsClaimIds.flatMap((id) => {
+    const claim = input.claimById.get(id);
+    return claim ? [claim] : [];
+  });
+  const supportingFacts = declassifyFacts(
+    input.evidence.supportsFactIds,
+    input.factById,
+  );
+  const implicatedCharacters = characterReferences(
+    input.evidence.implicatesCharacterIds,
+    input.characterById,
+  );
+  const excludesCharacters = characterReferences(
+    input.evidence.excludesCharacterIds,
+    input.characterById,
+  );
+
+  return {
+    id: input.evidence.id,
+    name: input.evidence.name,
+    description: input.evidence.description,
+    kind: input.evidence.kind,
+    critical: input.evidence.critical,
+    discovered: input.session.discoveredEvidenceIds.includes(input.evidence.id),
+    includedInReport: input.submittedEvidenceIds.has(input.evidence.id),
+    requiredForSolution: input.requiredEvidenceIds.has(input.evidence.id),
+    supportsFacts: supportingFacts,
+    contradictsClaims: contradictoryClaims,
+    implicatesCharacters: implicatedCharacters,
+    excludesCharacters,
+    acquisition: buildEvidenceAcquisition(input),
+    followUps: buildEvidenceFollowUps({
+      contradictoryClaims,
+      implicatedCharacters,
+      supportingFacts,
+    }),
+  };
+}
+
+function buildEvidenceAcquisition(input: {
+  evidence: CaseArtifact["evidence"][number];
+  caseArtifact: CaseArtifact;
+  evidenceById: ReadonlyMap<string, CaseArtifact["evidence"][number]>;
+  characterById: ReadonlyMap<string, CaseArtifact["characters"][number]>;
+  sceneById: ReadonlyMap<string, CaseArtifact["scenes"][number]>;
+  objectById: ReadonlyMap<
+    string,
+    CaseArtifact["scenes"][number]["objects"][number]
+  >;
+}): CaseReviewAcquisition {
+  const discovery = input.evidence.discovery;
+  const scene = discovery.sceneId
+    ? input.sceneById.get(discovery.sceneId)
+    : undefined;
+  const object = discovery.objectId
+    ? input.objectById.get(discovery.objectId)
+    : undefined;
+  const character = discovery.characterId
+    ? input.characterById.get(discovery.characterId)
+    : undefined;
+
+  return {
+    method: discovery.method,
+    primaryAction: discovery.actionAliases[0] ?? input.evidence.name,
+    scene: scene ? { id: scene.id, name: scene.name } : undefined,
+    object: object ? { id: object.id, name: object.name } : undefined,
+    character: character
+      ? {
+          id: character.id,
+          name: character.name,
+          occupation: character.occupation,
+        }
+      : undefined,
+    prerequisiteEvidence: evidenceReferences(
+      discovery.prerequisiteEvidenceIds,
+      input.evidenceById,
+    ),
+    unlockRequirements: unlockRequirementsForEvidence({
+      evidence: input.evidence,
+      caseArtifact: input.caseArtifact,
+      evidenceById: input.evidenceById,
+      sceneById: input.sceneById,
+      characterById: input.characterById,
+    }),
+  };
+}
+
+function unlockRequirementsForEvidence(input: {
+  evidence: CaseArtifact["evidence"][number];
+  caseArtifact: CaseArtifact;
+  evidenceById: ReadonlyMap<string, CaseArtifact["evidence"][number]>;
+  sceneById: ReadonlyMap<string, CaseArtifact["scenes"][number]>;
+  characterById: ReadonlyMap<string, CaseArtifact["characters"][number]>;
+}): CaseReviewUnlockRequirement[] {
+  const targetIds = [
+    { targetType: "evidence" as const, targetId: input.evidence.id },
+    ...(input.evidence.discovery.sceneId
+      ? [{ targetType: "scene" as const, targetId: input.evidence.discovery.sceneId }]
+      : []),
+    ...(input.evidence.discovery.characterId
+      ? [
+          {
+            targetType: "character" as const,
+            targetId: input.evidence.discovery.characterId,
+          },
+        ]
+      : []),
+  ];
+
+  return input.caseArtifact.unlockRules
+    .filter(
+      (rule) =>
+        targetIds.some(
+          (target) =>
+            target.targetType === rule.targetType && target.targetId === rule.targetId,
+        ) &&
+        (rule.allEvidenceIds.length > 0 || rule.anyEvidenceIds.length > 0),
+    )
+    .map((rule) => ({
+      targetType: rule.targetType,
+      targetName: unlockTargetName(
+        rule.targetType,
+        rule.targetId,
+        input.evidenceById,
+        input.sceneById,
+        input.characterById,
+      ),
+      allEvidence: evidenceReferences(rule.allEvidenceIds, input.evidenceById),
+      anyEvidence: evidenceReferences(rule.anyEvidenceIds, input.evidenceById),
+    }));
+}
+
+function buildEvidenceFollowUps(input: {
+  contradictoryClaims: DeclassifiedClaim[];
+  implicatedCharacters: Array<{ id: string; name: string }>;
+  supportingFacts: DeclassifiedFact[];
+}): CaseReviewFollowUp[] {
+  const factStatements = input.supportingFacts.map((fact) => fact.statement);
+  if (input.contradictoryClaims.length > 0) {
+    return input.contradictoryClaims.map((claim) => ({
+      characterId: claim.speakerId,
+      characterName: claim.speakerName,
+      claimId: claim.id,
+      claimStatement: claim.statement,
+      factStatements,
+    }));
+  }
+  return input.implicatedCharacters.map((character) => ({
+    characterId: character.id,
+    characterName: character.name,
+    factStatements,
+  }));
+}
+
+function declassifyFacts(
+  factIds: string[],
+  factById: ReadonlyMap<string, CaseArtifact["facts"][number]>,
+): DeclassifiedFact[] {
+  return factIds.flatMap((id) => {
+    const fact = factById.get(id);
+    return fact ? [{ ...fact }] : [];
+  });
+}
+
+function evidenceReferences(
+  evidenceIds: string[],
+  evidenceById: ReadonlyMap<string, CaseArtifact["evidence"][number]>,
+): CaseReviewEvidenceReference[] {
+  return evidenceIds.map((id) => ({ id, name: evidenceById.get(id)?.name ?? id }));
+}
+
+function characterReferences(
+  characterIds: string[],
+  characterById: ReadonlyMap<string, CaseArtifact["characters"][number]>,
+) {
+  return characterIds.map((id) => ({ id, name: characterById.get(id)?.name ?? id }));
+}
+
+function unlockTargetName(
+  targetType: CaseReviewUnlockRequirement["targetType"],
+  targetId: string,
+  evidenceById: ReadonlyMap<string, CaseArtifact["evidence"][number]>,
+  sceneById: ReadonlyMap<string, CaseArtifact["scenes"][number]>,
+  characterById: ReadonlyMap<string, CaseArtifact["characters"][number]>,
+) {
+  if (targetType === "evidence") return evidenceById.get(targetId)?.name ?? targetId;
+  if (targetType === "scene") return sceneById.get(targetId)?.name ?? targetId;
+  if (targetType === "character") {
+    return characterById.get(targetId)?.name ?? targetId;
+  }
+  return `分析目标 ${targetId}`;
 }
 
 function investigationIntentMatches(
