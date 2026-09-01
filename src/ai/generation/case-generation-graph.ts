@@ -304,7 +304,21 @@ export function compileMinimumSolutionChain(
     return caseArtifact;
   }
 
-  const interviewEvidenceIds = candidateEvidenceIds.filter((id) => {
+  const directSceneEvidenceIds = new Set(
+    candidateEvidenceIds.filter((id) => {
+      const evidence = evidenceById.get(id);
+      return (
+        Boolean(evidence?.discovery.sceneId) &&
+        (evidence?.kind === "physical" || evidence?.kind === "forensic")
+      );
+    }),
+  );
+  const nonDirectEvidenceIds = candidateEvidenceIds.filter(
+    (id) => !directSceneEvidenceIds.has(id),
+  );
+  // 现场法证可以支撑推理，但不能被编译器自动拼成三条以内的直指结论。
+  // 决定性链条必须跨过人物对话和非现场直证，保留玩家调查与交叉验证的空间。
+  const interviewEvidenceIds = nonDirectEvidenceIds.filter((id) => {
     const evidence = evidenceById.get(id);
     return (
       evidence?.discovery.method === "interview" &&
@@ -316,10 +330,16 @@ export function compileMinimumSolutionChain(
   if (interviewEvidenceIds.length < 2) {
     return caseArtifact;
   }
+  const nonInterviewEvidenceIds = nonDirectEvidenceIds.filter(
+    (id) => !interviewEvidenceIds.includes(id),
+  );
+  if (nonInterviewEvidenceIds.length < 3) {
+    return caseArtifact;
+  }
   const requiredEvidenceIds = [
     ...interviewEvidenceIds.slice(0, 2),
-    ...candidateEvidenceIds.filter((id) => !interviewEvidenceIds.includes(id)),
-  ].slice(0, 5);
+    ...nonInterviewEvidenceIds.slice(0, 3),
+  ];
   const chainIndexByEvidenceId = new Map(
     requiredEvidenceIds.map((id, index) => [id, index]),
   );

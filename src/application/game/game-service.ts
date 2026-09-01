@@ -7,7 +7,11 @@ import {
   performInvestigation,
   presentEvidence,
   requestHint,
+  resolveConfrontation,
+  startConfrontation,
   submitCaseReport,
+  type ResolveConfrontationCommand,
+  type StartConfrontationCommand,
   type SubmitCaseReportCommand,
 } from "@/domain/game/game-runtime";
 import type { GameRepository } from "@/infrastructure/persistence/game-repository";
@@ -224,6 +228,70 @@ export class GameService {
           outcome: { ...evaluated.outcome, report },
         };
       },
+    );
+    const game = await this.repository.loadGame(input.playerId, input.sessionId);
+    return {
+      outcome: persisted.outcome,
+      replayed: persisted.replayed,
+      view: getPlayerCaseView(game.caseArtifact, persisted.session),
+      review: getCaseReview(game.caseArtifact, persisted.session),
+    };
+  }
+
+  async startConfrontation(
+    input: {
+      playerId: string;
+      sessionId: string;
+      expectedRevision: number;
+    } & StartConfrontationCommand,
+  ) {
+    const persisted = await this.repository.executeGameCommand(
+      {
+        playerId: input.playerId,
+        sessionId: input.sessionId,
+        commandId: input.commandId,
+        kind: "start_confrontation",
+        expectedRevision: input.expectedRevision,
+        request: { suspectId: input.suspectId },
+        now: input.now,
+      },
+      (caseArtifact, session) =>
+        startConfrontation(caseArtifact, session, input),
+    );
+    const game = await this.repository.loadGame(input.playerId, input.sessionId);
+    return {
+      outcome: persisted.outcome,
+      replayed: persisted.replayed,
+      view: getPlayerCaseView(game.caseArtifact, persisted.session),
+    };
+  }
+
+  async resolveConfrontation(
+    input: {
+      playerId: string;
+      sessionId: string;
+      expectedRevision: number;
+    } & ResolveConfrontationCommand,
+  ) {
+    const persisted = await this.repository.executeGameCommand(
+      {
+        playerId: input.playerId,
+        sessionId: input.sessionId,
+        commandId: input.commandId,
+        kind: "resolve_confrontation",
+        expectedRevision: input.expectedRevision,
+        request: {
+          culpritId: input.culpritId,
+          motiveFactId: input.motiveFactId,
+          methodFactId: input.methodFactId,
+          evidenceIds: input.evidenceIds,
+          timelineEventIds: input.timelineEventIds,
+          reasoning: input.reasoning,
+        },
+        now: input.now,
+      },
+      (caseArtifact, session) =>
+        resolveConfrontation(caseArtifact, session, input),
     );
     const game = await this.repository.loadGame(input.playerId, input.sessionId);
     return {

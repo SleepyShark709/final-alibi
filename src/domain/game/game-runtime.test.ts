@@ -8,8 +8,10 @@ import {
   performInvestigation,
   presentEvidence,
   recordDialogueTurn,
+  resolveConfrontation,
   requestHint,
   startGame,
+  startConfrontation,
   submitCaseReport,
   type GameSession,
 } from "./game-runtime";
@@ -190,6 +192,33 @@ describe("deterministic game runtime", () => {
     });
   });
 
+  it("only records deductions after their supporting evidence is found", () => {
+    const afterWatch = performInvestigation(tutorialCase, newSession(), {
+      commandId: "command_deduction_watch",
+      text: "检查腕表",
+      sceneId: "scene_study",
+    }).session;
+    const beforeLedger = getPlayerCaseView(tutorialCase, afterWatch);
+    const afterLedger = performInvestigation(tutorialCase, afterWatch, {
+      commandId: "command_deduction_ledger",
+      text: "翻找书桌抽屉",
+      sceneId: "scene_study",
+    }).session;
+    const afterLedgerView = getPlayerCaseView(tutorialCase, afterLedger);
+
+    expect(
+      beforeLedger.deductions.some(
+        (fact) => fact.id === tutorialCase.solution.motiveFactId,
+      ),
+    ).toBe(false);
+    expect(afterLedgerView.deductions).toContainEqual(
+      expect.objectContaining({
+        id: tutorialCase.solution.motiveFactId,
+        sourceEvidenceNames: expect.arrayContaining(["异常转账账簿"]),
+      }),
+    );
+  });
+
   it("rejects a character disclosing another person's claim", () => {
     expect(() =>
       recordDialogueTurn(tutorialCase, newSession(), {
@@ -247,6 +276,103 @@ describe("deterministic game runtime", () => {
       culprit: "character_li_wenzhou",
       lieCount: 1,
     });
+  });
+
+  it("lets a fully prepared player rebut an alibi and obtain a confession", () => {
+    expect(() =>
+      startConfrontation(tutorialCase, newSession(), {
+        commandId: "command_confrontation_too_early",
+        suspectId: tutorialCase.solution.culpritId,
+      }),
+    ).toThrow(/requires every reachable evidence item/);
+
+    const ready = discoverAllEvidence(newSession());
+    const started = startConfrontation(tutorialCase, ready, {
+      commandId: "command_start_confrontation",
+      suspectId: tutorialCase.solution.culpritId,
+      now: "2026-08-31T10:25:00+08:00",
+    });
+    const premature = resolveConfrontation(tutorialCase, started.session, {
+      commandId: "command_rebutted_confrontation",
+      culpritId: tutorialCase.solution.culpritId,
+      motiveFactId: "",
+      methodFactId: "",
+      evidenceIds: tutorialCase.evidence.map((evidence) => evidence.id),
+      timelineEventIds: tutorialCase.timeline.map((event) => event.id),
+      reasoning: "我还没有将动机和手法说完整。",
+    });
+    const restarted = startConfrontation(tutorialCase, premature.session, {
+      commandId: "command_restart_confrontation",
+      suspectId: tutorialCase.solution.culpritId,
+    });
+    const resolved = resolveConfrontation(tutorialCase, restarted.session, {
+      commandId: "command_resolve_confrontation",
+      culpritId: tutorialCase.solution.culpritId,
+      motiveFactId: tutorialCase.solution.motiveFactId,
+      methodFactId: tutorialCase.solution.methodFactId,
+      evidenceIds: tutorialCase.evidence.map((evidence) => evidence.id),
+      timelineEventIds: tutorialCase.timeline.map((event) => event.id),
+      reasoning: "账目证明动机，现场物证与门禁记录证明手法和机会，完整时间线排除了其他嫌疑人。",
+      now: "2026-08-31T10:30:00+08:00",
+    });
+    const playerView = getPlayerCaseView(tutorialCase, started.session);
+    const review = getCaseReview(tutorialCase, resolved.session);
+
+    expect({
+      confrontationReady:
+        playerView.reportOptions.hasCompleteConfrontationDossier,
+      startStatus: started.outcome.status,
+      prematureStatus: premature.outcome.status,
+      restartStatus: restarted.outcome.status,
+      finalStatus: resolved.outcome.status,
+      gameStatus: resolved.session.status,
+      verdict: resolved.outcome.report?.verdict,
+      confession: resolved.outcome.confession,
+      reviewConfession: review?.confession,
+    }).toEqual({
+      confrontationReady: true,
+      startStatus: "started",
+      prematureStatus: "rebutted",
+      restartStatus: "started",
+      finalStatus: "confessed",
+      gameStatus: "closed",
+      verdict: "solved",
+      confession: expect.stringContaining("无从抵赖"),
+      reviewConfession: expect.stringContaining("挪用基金会资金"),
+    });
+  });
+
+  it("does not reveal the actual culprit when the confronted suspect is wrong", () => {
+    const started = startConfrontation(
+      tutorialCase,
+      discoverAllEvidence(newSession()),
+      {
+        commandId: "command_start_wrong_confrontation",
+        suspectId: "character_shen_lan",
+      },
+    );
+    const rebutted = resolveConfrontation(tutorialCase, started.session, {
+      commandId: "command_resolve_wrong_confrontation",
+      culpritId: "character_shen_lan",
+      motiveFactId: tutorialCase.solution.motiveFactId,
+      methodFactId: tutorialCase.solution.methodFactId,
+      evidenceIds: tutorialCase.evidence.map((evidence) => evidence.id),
+      timelineEventIds: tutorialCase.timeline.map((event) => event.id),
+      reasoning: "我尝试用完整的线索、动机和时间线指控沈岚。",
+    });
+
+    expect({
+      status: rebutted.outcome.status,
+      gameStatus: rebutted.session.status,
+      rebuttal: rebutted.outcome.rebuttal,
+      confrontation: rebutted.session.confrontation,
+    }).toEqual({
+      status: "rebutted",
+      gameStatus: "investigating",
+      rebuttal: expect.stringContaining("沈岚"),
+      confrontation: undefined,
+    });
+    expect(rebutted.outcome.rebuttal).not.toContain("李闻舟");
   });
 
   it("treats a correct early accusation with partial evidence as a solved case", () => {
@@ -552,4 +678,11 @@ function discoverRequiredEvidence(initial: GameSession) {
       stateDelta: { trust: 1, pressure: 2, alertness: 1 },
     },
   }).session;
+}
+
+function discoverAllEvidence(initial: GameSession): GameSession {
+  return {
+    ...initial,
+    discoveredEvidenceIds: tutorialCase.evidence.map((evidence) => evidence.id),
+  };
 }

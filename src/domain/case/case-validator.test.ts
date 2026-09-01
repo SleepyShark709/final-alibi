@@ -211,17 +211,98 @@ describe("validateCaseArtifact", () => {
     });
   });
 
-  it("applies the full playable-case content budget at publication time", () => {
+  it("applies the remaining playable-case content requirements at publication time", () => {
     const report = validatePublishableCaseArtifact(makeValidCaseArtifact());
 
     expect(report.issues.map((issue) => issue.code)).toEqual([
       "invalid_scene_count",
-      "invalid_evidence_count",
       "insufficient_solution_evidence",
       "insufficient_critical_evidence",
       "missing_interview_evidence",
       "insufficient_required_interview_evidence",
     ]);
+  });
+
+  it("allows a publishable case with sixteen evidence items", async () => {
+    const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
+    const caseArtifact = structuredClone(tutorialCase);
+    const sourceEvidence = caseArtifact.evidence[0];
+    if (!sourceEvidence) throw new Error("Tutorial case is missing evidence");
+
+    while (caseArtifact.evidence.length < 16) {
+      const index = caseArtifact.evidence.length + 1;
+      caseArtifact.evidence.push({
+        ...sourceEvidence,
+        id: `evidence_expanded_${index}`,
+        name: `补充线索 ${index}`,
+        description: `用于交叉核验案情的补充线索 ${index}。`,
+        discovery: {
+          ...sourceEvidence.discovery,
+          actionAliases: [`检查补充线索 ${index}`],
+        },
+      });
+    }
+
+    expect(validatePublishableCaseArtifact(caseArtifact)).toEqual({
+      valid: true,
+      issues: [],
+    });
+  });
+
+  it("allows a publishable case with more than three scenes", async () => {
+    const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
+    const caseArtifact = structuredClone(tutorialCase);
+    caseArtifact.scenes.push({
+      id: "scene_archive_annex",
+      name: "档案附楼",
+      description: "一间可供补充调查的旧档案室。",
+      initiallyUnlocked: true,
+      objects: [],
+    });
+
+    expect(validatePublishableCaseArtifact(caseArtifact)).toEqual({
+      valid: true,
+      issues: [],
+    });
+  });
+
+  it("rejects a few direct scene clues that reveal and lock the culprit", async () => {
+    const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
+    const caseArtifact = structuredClone(tutorialCase);
+    const otherSuspectIds = caseArtifact.characters
+      .filter(
+        (character) =>
+          character.roleTier === "suspect" &&
+          character.id !== caseArtifact.culpritId,
+      )
+      .map((character) => character.id);
+
+    otherSuspectIds.forEach((suspectId, index) => {
+      caseArtifact.evidence.push({
+        id: `evidence_direct_forensic_${index + 1}`,
+        name: `现场法证比对 ${index + 1}`,
+        description: `比对结果直接检出李闻舟的身份痕迹，并排除一名其他嫌疑人。`,
+        kind: "forensic",
+        supportsFactIds: [],
+        contradictsClaimIds: [],
+        implicatesCharacterIds: [],
+        excludesCharacterIds: [suspectId],
+        critical: false,
+        discovery: {
+          method: "analyze",
+          sceneId: "scene_study",
+          actionAliases: [`复核现场法证 ${index + 1}`],
+          prerequisiteEvidenceIds: [],
+        },
+      });
+    });
+
+    const codes = validatePublishableCaseArtifact(caseArtifact).issues.map(
+      (issue) => issue.code,
+    );
+
+    expect(codes).toContain("premature_direct_evidence_reveal");
+    expect(codes).toContain("premature_direct_evidence_lock");
   });
 
   it("requires two dialogue-derived evidence items in the required solution chain", async () => {

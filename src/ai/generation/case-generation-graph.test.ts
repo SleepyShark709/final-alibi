@@ -141,6 +141,25 @@ describe("case generation graph", () => {
     expect(requiredDialogueEvidenceIds).toHaveLength(2);
   });
 
+  it("keeps direct scene physical and forensic clues out of the decisive chain", () => {
+    const draft = structuredClone(
+      generatedTutorial("case_generated_indirect_chain", "seed-indirect-chain"),
+    );
+
+    const compiled = compileMinimumSolutionChain(draft);
+    const directRequiredEvidenceIds = compiled.solution.requiredEvidenceIds.filter(
+      (evidenceId) => {
+        const evidence = compiled.evidence.find((item) => item.id === evidenceId);
+        return (
+          Boolean(evidence?.discovery.sceneId) &&
+          (evidence?.kind === "physical" || evidence?.kind === "forensic")
+        );
+      },
+    );
+
+    expect(directRequiredEvidenceIds).toEqual([]);
+  });
+
   it("repairs a logically opaque case when the blind detective chooses differently", async () => {
     const artifact = generatedTutorial("case_generated_three", "seed-three");
     const provider = new ScriptedProvider([
@@ -172,13 +191,13 @@ describe("case generation graph", () => {
     const invalid = structuredClone(
       generatedTutorial("case_generated_rejected", "seed-rejected"),
     );
-    invalid.evidence = invalid.evidence.slice(0, 7);
+    invalid.scenes = invalid.scenes.slice(0, 2);
     const provider = new ScriptedProvider([invalid]);
     const graph = createCaseGenerationGraph(provider, { maxArtifactAttempts: 1 });
     const result = await graph.invoke(initialState("seed-rejected"));
 
     expect(result.finalArtifact).toBeNull();
-    expect(result.rejectionReason).toContain("evidence");
+    expect(result.rejectionReason).toContain("at least 3 scenes");
     expect(provider.requests).toEqual(["case_artifact"]);
   });
 

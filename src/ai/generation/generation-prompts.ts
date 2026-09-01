@@ -8,10 +8,11 @@ import type { CaseGenerationRequest } from "./generation-schema";
 const immutableRules = [
   "创作一个现代现实题材、无灵异、非血腥猎奇的中文谋杀谜案。",
   "恰好 4 名核心嫌疑人，真凶必须在这 4 人中；另有 2–4 名证人或被提及角色，以及 1 名受害者。",
-  "恰好 3 个可调查场景，8–12 条证据；至少 4 条相互补强的必要证据，不能依靠口供认罪才能定案。",
+  "至少 3 个可调查场景；至少 4 条相互补强的必要证据，不能依靠口供认罪才能定案。",
   "必须存在唯一解：完整可达证据应排除其余三名嫌疑人，并同时支持真凶的动机与手法。",
   "solution.requiredEvidenceIds 指定的必要证据子集本身就必须唯一锁定真凶、排除其余嫌疑人，并支持动机与手法；不能依赖未列入的顺手证据完成定案。",
   "为确保必要证据链可解，solution.requiredEvidenceIds 固定列出至少 5 条可达证据：其中 1 条在 supportsFactIds 写入 solution.motiveFactId，1 条写入 solution.methodFactId，至少 1 条在 implicatesCharacterIds 写入 culpritId；其余证据合计必须在 excludesCharacterIds 中分别排除另外 3 名嫌疑人。上述 5 条均应无 prerequisiteEvidenceIds，且自身不要排除 culpritId。",
+  "避免\"现场三条物证直接点名凶手\"：在场景取得的 physical 或 forensic 证据不得单独、也不得任取三条以内就唯一锁定真凶；最多一条可直接提及某名嫌疑人的身份痕迹。指纹、DNA、血迹等检验只能作为待交叉验证的支撑，定案必须结合跨场景的文书或数字记录、人物证言、动机与时间线。",
   "每条证据只能通过预先声明的调查方式、地点、物件或人物获得；所有必要证据必须可达，解锁链不能循环。",
   "至少两条关键证言证据必须通过 interview + characterId 获得，并写入 solution.requiredEvidenceIds、critical:true；actionAliases 要覆盖自然中文问法。每条对话证据都要在场景可见物件、公开身份或案件背景中留下不泄露答案的追问方向，让玩家能推断该问谁、问什么。",
   "角色只知道 knowledge 中列出的内容；privateProfile 仅供结案复盘，不能承载角色对话所必需的唯一事实。真凶的 knowledge.factIds 必须包含自己的动机、手法与机会事实。秘密与 lieRules 必须引用已有 fact，谎言只能否认、转移、淡化或编造掩护。",

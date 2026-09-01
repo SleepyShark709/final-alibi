@@ -51,6 +51,25 @@ const actionSchema = z.discriminatedUnion("type", [
       reasoning: z.string().trim().min(10).max(4_000),
     })
     .strict(),
+  z
+    .object({
+      ...baseCommand,
+      type: z.literal("start_confrontation"),
+      suspectId: z.string().trim().min(1).max(160),
+    })
+    .strict(),
+  z
+    .object({
+      ...baseCommand,
+      type: z.literal("resolve_confrontation"),
+      culpritId: z.string().trim().min(1).max(160),
+      motiveFactId: z.string(),
+      methodFactId: z.string(),
+      evidenceIds: z.array(z.string()).min(2).max(100),
+      timelineEventIds: z.array(z.string()).max(100),
+      reasoning: z.string().trim().min(10).max(4_000),
+    })
+    .strict(),
 ]);
 
 export async function POST(
@@ -84,6 +103,16 @@ export async function POST(
     if (input.type === "submit_report") {
       return NextResponse.json(
         await services.game.submitReport({ playerId, sessionId, ...input }),
+      );
+    }
+    if (input.type === "start_confrontation") {
+      return NextResponse.json(
+        await services.game.startConfrontation({ playerId, sessionId, ...input }),
+      );
+    }
+    if (input.type === "resolve_confrontation") {
+      return NextResponse.json(
+        await services.game.resolveConfrontation({ playerId, sessionId, ...input }),
       );
     }
     throw new HttpError(400, "unknown_action", "未知行动。");

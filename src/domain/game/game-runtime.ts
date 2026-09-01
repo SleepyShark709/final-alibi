@@ -1,4 +1,5 @@
 import type { CaseArtifact } from "@/domain/case/case-artifact";
+import { findReachableEvidenceIds } from "@/domain/case/evidence-reachability";
 
 /**
  * 纯确定性游戏状态机。这里不访问数据库、不调用模型：每个命令把冻结的案件账本和
@@ -16,6 +17,8 @@ export interface GameEvent {
     | "dialogue"
     | "hint_used"
     | "evidence_presented"
+    | "confrontation_started"
+    | "confrontation_rebutted"
     | "case_report_submitted";
   summary: string;
   data: Record<string, string | number | boolean | string[] | null>;
@@ -48,6 +51,12 @@ export interface DialogueExchange {
   discoveredEvidenceIds: string[];
 }
 
+export interface ConfrontationState {
+  suspectId: string;
+  rebuttal: string;
+  confession?: string;
+}
+
 /**
  * 可序列化的玩家业务真相。它只保存玩家已经获得的状态，不能复制 CaseArtifact 的私密字段到这里。
  */
@@ -69,6 +78,7 @@ export interface GameSession {
   hintLevelsByChainId: Record<string, number>;
   processedCommandIds: string[];
   events: GameEvent[];
+  confrontation?: ConfrontationState;
   reportCommandId?: string;
   report?: CaseReportResult;
 }
@@ -200,6 +210,29 @@ export interface SubmitCaseReportOutcome {
   report: CaseReportResult;
 }
 
+export interface StartConfrontationCommand {
+  commandId: string;
+  suspectId: string;
+  now?: string;
+}
+
+export interface StartConfrontationOutcome {
+  status: "started" | "duplicate";
+  confrontation?: ConfrontationState;
+}
+
+export interface ResolveConfrontationCommand extends CaseReportSubmission {
+  commandId: string;
+  now?: string;
+}
+
+export interface ResolveConfrontationOutcome {
+  status: "confessed" | "rebutted" | "duplicate";
+  rebuttal?: string;
+  confession?: string;
+  report?: CaseReportResult;
+}
+
 /** 结案后向玩家公开的客观事实；调查中绝不能使用这个投影。 */
 export interface DeclassifiedFact {
   id: string;
@@ -289,6 +322,7 @@ export interface CaseReview {
   lies: DeclassifiedClaim[];
   evidence: DeclassifiedEvidence[];
   playerEvents: GameEvent[];
+  confession?: string;
   report: CaseReportResult;
 }
 
@@ -672,6 +706,119 @@ export function presentEvidence(
   return { session: nextSession, outcome: { status } };
 }
 
+export function startConfrontation(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  command: StartConfrontationCommand,
+): { session: GameSession; outcome: StartConfrontationOutcome } {
+  assertCaseMatches(caseArtifact, session);
+  if (session.processedCommandIds.includes(command.commandId)) {
+    return {
+      session,
+      outcome: { status: "duplicate", confrontation: session.confrontation },
+    };
+  }
+  assertActiveCase(caseArtifact, session);
+  if (!hasCompleteConfrontationDossier(caseArtifact, session)) {
+    throw new Error(
+      "a confrontation requires every reachable evidence item and the reconstructed timeline",
+    );
+  }
+  if (session.confrontation) {
+    throw new Error("a confrontation is already underway");
+  }
+  const suspect = caseArtifact.characters.find(
+    (character) =>
+      character.id === command.suspectId && character.roleTier === "suspect",
+  );
+  if (!suspect) {
+    throw new Error("a confrontation requires a named suspect");
+  }
+
+  const confrontation: ConfrontationState = {
+    suspectId: suspect.id,
+    rebuttal: `${suspect.name}神色未变：\u201c你说我有罪，那你怎么解释我的不在场证明？没有把动机、手法和时间线连成完整证据链，就别想让我认罪。\u201d`,
+  };
+  const now = command.now ?? new Date().toISOString();
+  const nextSession = appendEvent(
+    { ...session, confrontation },
+    command.commandId,
+    now,
+    "confrontation_started",
+    `向${suspect.name}发起当面对质`,
+    { suspectId: suspect.id },
+  );
+
+  return { session: nextSession, outcome: { status: "started", confrontation } };
+}
+
+export function resolveConfrontation(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  command: ResolveConfrontationCommand,
+): { session: GameSession; outcome: ResolveConfrontationOutcome } {
+  assertCaseMatches(caseArtifact, session);
+  if (session.processedCommandIds.includes(command.commandId)) {
+    return {
+      session,
+      outcome: {
+        status: "duplicate",
+        rebuttal: session.confrontation?.rebuttal,
+        confession: session.confrontation?.confession,
+        report: session.report,
+      },
+    };
+  }
+  assertActiveCase(caseArtifact, session);
+  const confrontation = session.confrontation;
+  if (!confrontation) {
+    throw new Error("a confrontation has not been started");
+  }
+
+  const culprit = caseArtifact.characters.find(
+    (character) => character.id === caseArtifact.solution.culpritId,
+  );
+  const confrontedSuspect = caseArtifact.characters.find(
+    (character) => character.id === confrontation.suspectId,
+  );
+  const now = command.now ?? new Date().toISOString();
+  if (!culprit || !isCompleteConfrontationSubmission(caseArtifact, session, command)) {
+    const rebuttal = `${confrontedSuspect?.name ?? "嫌疑人"}仍然摇头：\u201c你的说法还没有排除其他可能，也没有形成让我无从抵赖的完整闭环。\u201d`;
+    const nextSession = appendEvent(
+      { ...session, confrontation: undefined },
+      command.commandId,
+      now,
+      "confrontation_rebutted",
+      "对质未能形成完整证据链",
+      { suspectId: confrontation.suspectId },
+    );
+    return { session: nextSession, outcome: { status: "rebutted", rebuttal } };
+  }
+
+  const motiveStatement =
+    caseArtifact.facts
+      .find((fact) => fact.id === caseArtifact.solution.motiveFactId)
+      ?.statement.replaceAll(culprit.name, "我")
+      .replace(/[。！？]$/u, "") ?? "我有无法摆脱的作案动机";
+  const confession = `${culprit.name}沉默良久，终于低声承认：\u201c……是我做的。${motiveStatement}，我才会铤而走险。你已经把动机、手法和时间线全都讲清楚了，我无从抵赖。\u201d`;
+  const submitted = submitCaseReport(
+    caseArtifact,
+    {
+      ...session,
+      confrontation: { ...confrontation, confession },
+    },
+    command,
+  );
+  return {
+    session: submitted.session,
+    outcome: {
+      status: "confessed",
+      confession,
+      report: submitted.outcome.report,
+    },
+  };
+}
+
 export function submitCaseReport(
   caseArtifact: CaseArtifact,
   session: GameSession,
@@ -824,6 +971,42 @@ export function submitCaseReport(
   };
 }
 
+function hasCompleteConfrontationDossier(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+) {
+  const reachableEvidenceIds = findReachableEvidenceIds(caseArtifact);
+  return [...reachableEvidenceIds].every((evidenceId) =>
+    session.discoveredEvidenceIds.includes(evidenceId),
+  );
+}
+
+function isCompleteConfrontationSubmission(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  command: ResolveConfrontationCommand,
+) {
+  const confrontation = session.confrontation;
+  if (!confrontation || !hasCompleteConfrontationDossier(caseArtifact, session)) {
+    return false;
+  }
+  const submittedEvidenceIds = new Set(command.evidenceIds);
+  const submittedTimelineEventIds = new Set(command.timelineEventIds);
+  const reachableEvidenceIds = findReachableEvidenceIds(caseArtifact);
+
+  return (
+    command.culpritId === confrontation.suspectId &&
+    command.culpritId === caseArtifact.solution.culpritId &&
+    command.motiveFactId === caseArtifact.solution.motiveFactId &&
+    command.methodFactId === caseArtifact.solution.methodFactId &&
+    command.reasoning.trim().length >= 10 &&
+    [...reachableEvidenceIds].every((evidenceId) =>
+      submittedEvidenceIds.has(evidenceId),
+    ) &&
+    caseArtifact.timeline.every((event) => submittedTimelineEventIds.has(event.id))
+  );
+}
+
 export function getPlayerCaseView(
   caseArtifact: CaseArtifact,
   session: GameSession,
@@ -833,13 +1016,18 @@ export function getPlayerCaseView(
   const victim = caseArtifact.characters.find(
     (character) => character.id === caseArtifact.victimId,
   );
+  const discoveredEvidence = caseArtifact.evidence.filter((evidence) =>
+    session.discoveredEvidenceIds.includes(evidence.id),
+  );
   const discoveredFactIds = new Set(
-    caseArtifact.evidence
-      .filter((evidence) => session.discoveredEvidenceIds.includes(evidence.id))
-      .flatMap((evidence) => evidence.supportsFactIds),
+    discoveredEvidence.flatMap((evidence) => evidence.supportsFactIds),
   );
   const hasCompleteEvidenceChain = caseArtifact.solution.requiredEvidenceIds.every(
     (evidenceId) => session.discoveredEvidenceIds.includes(evidenceId),
+  );
+  const confrontationReady = hasCompleteConfrontationDossier(
+    caseArtifact,
+    session,
   );
 
   return {
@@ -853,6 +1041,7 @@ export function getPlayerCaseView(
         (total, level) => total + level,
         0,
       ),
+      confrontation: session.confrontation ?? null,
       report: session.report,
     },
     case: {
@@ -881,9 +1070,7 @@ export function getPlayerCaseView(
           description: object.description,
         })),
       })),
-    evidence: caseArtifact.evidence
-      .filter((evidence) => session.discoveredEvidenceIds.includes(evidence.id))
-      .map((evidence) => ({
+    evidence: discoveredEvidence.map((evidence) => ({
         id: evidence.id,
         name: evidence.name,
         description: evidence.description,
@@ -904,7 +1091,16 @@ export function getPlayerCaseView(
     })),
     deductions: caseArtifact.facts
       .filter((fact) => discoveredFactIds.has(fact.id))
-      .map((fact) => ({ id: fact.id, type: fact.type, statement: fact.statement })),
+      .map((fact) => ({
+        id: fact.id,
+        type: fact.type,
+        statement: fact.statement,
+        sourceEvidenceNames: unique(
+          discoveredEvidence
+            .filter((evidence) => evidence.supportsFactIds.includes(fact.id))
+            .map((evidence) => evidence.name),
+        ),
+      })),
     reportOptions: {
       suspects: caseArtifact.characters
         .filter((character) => character.roleTier === "suspect")
@@ -923,6 +1119,7 @@ export function getPlayerCaseView(
           }))
         : [],
       hasCompleteEvidenceChain,
+      hasCompleteConfrontationDossier: confrontationReady,
     },
   };
 }
@@ -991,6 +1188,7 @@ export function getCaseReview(
     lies: claims.filter((claim) => claim.kind === "lie"),
     evidence,
     playerEvents: session.events,
+    confession: session.confrontation?.confession,
     report,
   };
 }

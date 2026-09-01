@@ -30,6 +30,11 @@ interface GameView {
     startedAt: string;
     updatedAt: string;
     hintCount: number;
+    confrontation: {
+      suspectId: string;
+      rebuttal: string;
+      confession?: string;
+    } | null;
     report?: ReportResult;
   };
   case: {
@@ -72,6 +77,7 @@ interface GameView {
     id: string;
     type: string;
     statement: string;
+    sourceEvidenceNames: string[];
   }>;
   reportOptions: {
     suspects: CharacterView[];
@@ -79,6 +85,7 @@ interface GameView {
     methodFacts: Array<{ id: string; statement: string }>;
     timelineEvents: Array<{ id: string; timestamp: string; description: string }>;
     hasCompleteEvidenceChain: boolean;
+    hasCompleteConfrontationDossier: boolean;
   };
 }
 
@@ -566,7 +573,13 @@ export function DetectiveGame() {
 
   async function submitReport(event: React.FormEvent) {
     event.preventDefault();
-    if (!view || !reportIsComplete(reportDraft)) return;
+    if (!view) return;
+    if (view.session.confrontation) {
+      if (confrontationRequirements(view, reportDraft).length > 0) return;
+      await resolveConfrontation();
+      return;
+    }
+    if (!reportIsComplete(reportDraft)) return;
     await runBusy(async () => {
       const result = await requestJson<{
         view: GameView;
@@ -584,6 +597,60 @@ export function DetectiveGame() {
       setReview(result.review);
       setReviewError("");
       switchPanel("review");
+    });
+  }
+
+  async function startConfrontation() {
+    if (
+      !view ||
+      !view.reportOptions.hasCompleteConfrontationDossier ||
+      !reportDraft.culpritId
+    ) {
+      return;
+    }
+    await runBusy(async () => {
+      const result = await requestJson<{
+        outcome: { status: string; rebuttal?: string };
+        view: GameView;
+      }>(`/api/games/${view.session.id}/actions`, {
+        method: "POST",
+        body: JSON.stringify({
+          type: "start_confrontation",
+          commandId: commandId(),
+          expectedRevision: view.session.revision,
+          suspectId: reportDraft.culpritId,
+        }),
+      });
+      setView(result.view);
+      setNotice(result.outcome.rebuttal ?? "嫌疑人要求你拿出完整证据链。");
+    });
+  }
+
+  async function resolveConfrontation() {
+    if (!view) return;
+    await runBusy(async () => {
+      const result = await requestJson<{
+        outcome: { status: string; rebuttal?: string; confession?: string };
+        view: GameView;
+        review: CaseReview | null;
+      }>(`/api/games/${view.session.id}/actions`, {
+        method: "POST",
+        body: JSON.stringify({
+          type: "resolve_confrontation",
+          commandId: commandId(),
+          expectedRevision: view.session.revision,
+          ...reportDraft,
+        }),
+      });
+      setView(result.view);
+      if (result.outcome.status === "confessed") {
+        setReview(result.review);
+        setReviewError("");
+        setNotice(result.outcome.confession ?? "嫌疑人已认罪，案件告破。");
+        switchPanel("review");
+        return;
+      }
+      setNotice(result.outcome.rebuttal ?? "嫌疑人仍坚持自己的说法。");
     });
   }
 
@@ -835,6 +902,7 @@ export function DetectiveGame() {
               busy={busy || closed}
               onChange={setReportDraft}
               onSubmit={submitReport}
+              onStartConfrontation={startConfrontation}
             />
           )}
           {panel === "review" && (
@@ -1098,42 +1166,39 @@ function GenerationProgress(props: { job: GenerationJobView }) {
 function GenerationProgressMotion(props: { job: GenerationJobView }) {
   const terminal = isGenerationTerminal(props.job);
   const actualProgress = generationActualProgress(props.job);
-  const [displayProgress, setDisplayProgress] = useState(() => actualProgress);
+  const [estimatedProgress, setEstimatedProgress] = useState(
+    () => actualProgress,
+  );
+  const [statusTick, setStatusTick] = useState(0);
 
   useEffect(() => {
-    if (terminal && props.job.status !== "succeeded") return;
-    // The server still owns completion. This only eases sparse backend stage updates
-    // into a continuous, never-100%-until-verified player-facing progress signal.
-    const advanceProgress = () => {
-      setDisplayProgress((current) => {
-        const target = terminal
-          ? 100
-          : generationDisplayTarget(
-              props.job.status,
-              props.job.stage,
-              actualProgress,
-            );
-        if (current >= target) return current;
-        const remaining = target - current;
-        return Math.min(
-          target,
-          current + Math.max(terminal ? 0.9 : 0.18, remaining * (terminal ? 0.22 : 0.075)),
-        );
+    if (terminal) return;
+    const interval = window.setInterval(() => {
+      setEstimatedProgress((current) => {
+        const progress = Math.max(current, actualProgress);
+        const increment =
+          progress < 40 ? 0.36 : progress < 70 ? 0.22 : progress < 90 ? 0.1 : 0.025;
+        return Math.min(98.5, progress + increment);
       });
-    };
-
-    const interval = window.setInterval(advanceProgress, terminal ? 140 : 600);
+    }, 800);
     return () => window.clearInterval(interval);
-  }, [actualProgress, props.job.id, props.job.stage, props.job.status, terminal]);
+  }, [actualProgress, terminal]);
 
-  const visibleProgress =
-    terminal && props.job.status !== "succeeded"
-      ? Math.max(displayProgress, actualProgress)
-      : displayProgress;
+  useEffect(() => {
+    if (terminal) return;
+    const interval = window.setInterval(() => {
+      setStatusTick((current) => current + 1);
+    }, 10_000);
+    return () => window.clearInterval(interval);
+  }, [terminal]);
+
+  const visibleProgress = terminal
+    ? actualProgress
+    : Math.max(actualProgress, estimatedProgress);
   const progress = Math.round(visibleProgress);
   return (
     <section
-      className={`generation-progress is-${props.job.status} stage-${props.job.stage}`}
+      className={`generation-progress is-${props.job.status} stage-${props.job.stage}${terminal ? "" : " is-active"}`}
       role={props.job.status === "failed" ? "alert" : "status"}
       aria-live="polite"
     >
@@ -1148,14 +1213,14 @@ function GenerationProgressMotion(props: { job: GenerationJobView }) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={progress}
-        aria-valuetext={`${generationStageLabel(props.job)}，${progress}%`}
+        aria-valuetext={`${generationStageLabel(props.job)}，${terminal ? "" : "预计 "}${progress}%`}
       >
         <span style={{ width: `${visibleProgress}%` }} />
       </div>
       <p>
         {terminal
           ? generationTerminalText(props.job)
-          : generationProgressText(props.job)}
+          : generationProgressText(props.job, statusTick)}
       </p>
     </section>
   );
@@ -1462,6 +1527,9 @@ function NotebookPanel(props: {
             <article key={fact.id}>
               <strong>{factTypeLabel(fact.type)}</strong>
               <p>{fact.statement}</p>
+              <small className="deduction-source">
+                依据：{fact.sourceEvidenceNames.join("、")}
+              </small>
             </article>
           ))}
         </section>
@@ -1489,21 +1557,50 @@ function ReportPanel(props: {
   busy: boolean;
   onChange: (draft: ReportDraft) => void;
   onSubmit: (event: React.FormEvent) => void;
+  onStartConfrontation: () => void;
 }) {
-  const requirements = reportRequirements(props.draft);
+  const confrontation = props.view.session.confrontation;
+  const requirements = confrontation
+    ? confrontationRequirements(props.view, props.draft)
+    : reportRequirements(props.draft);
 
   return (
     <form className="stage-panel report-panel" onSubmit={props.onSubmit}>
-      <div className="stage-kicker">FINAL REPORT / ONE ATTEMPT</div>
-      <h2>提交结案报告</h2>
+      <div className="stage-kicker">
+        {confrontation ? "FACE TO FACE / EVIDENCE CHAIN" : "FINAL REPORT / ONE ATTEMPT"}
+      </div>
+      <h2>{confrontation ? "当面对质" : "提交结案报告"}</h2>
       <p className="report-warning">
-        卷宗提交后不可修改。证据尚未完全闭环时也可以提前锁定真凶；未填写的动机、手法与时间线只会影响最终得分。
+        {confrontation
+          ? "嫌疑人已经提出反驳。请用全部线索、动机、手法与完整时间线回应；只有形成闭环，才能让对方无从抵赖。"
+          : "卷宗提交后不可修改。证据尚未完全闭环时也可以提前锁定真凶；未填写的动机、手法与时间线只会影响最终得分。"}
       </p>
+      {confrontation ? (
+        <section className="confrontation-rebuttal" aria-live="polite">
+          <span>嫌疑人的反驳</span>
+          <p>“{confrontation.rebuttal}”</p>
+        </section>
+      ) : props.view.reportOptions.hasCompleteConfrontationDossier ? (
+        <section className="confrontation-invite">
+          <div>
+            <strong>所有可调查线索与时间线均已掌握</strong>
+            <p>可以先选择嫌疑人，再当面陈述完整证据链，争取让其认罪。</p>
+          </div>
+          <button
+            type="button"
+            onClick={props.onStartConfrontation}
+            disabled={props.busy || !props.draft.culpritId}
+          >
+            发起当面对质
+          </button>
+        </section>
+      ) : null}
       <div className="report-fields">
         <label>
           真凶
           <select
             value={props.draft.culpritId}
+            disabled={props.busy || Boolean(confrontation)}
             onChange={(event) => props.onChange({ ...props.draft, culpritId: event.target.value })}
           >
             <option value="">选择嫌疑人</option>
@@ -1513,24 +1610,28 @@ function ReportPanel(props: {
           </select>
         </label>
         <label>
-          动机判断（可选）
+          {confrontation ? "动机判断" : "动机判断（可选）"}
           <select
             value={props.draft.motiveFactId}
             onChange={(event) => props.onChange({ ...props.draft, motiveFactId: event.target.value })}
           >
-            <option value="">暂不判断（不影响提交）</option>
+            <option value="">
+              {confrontation ? "选择已发现的动机" : "暂不判断（不影响提交）"}
+            </option>
             {props.view.reportOptions.motiveFacts.map((fact) => (
               <option key={fact.id} value={fact.id}>{fact.statement}</option>
             ))}
           </select>
         </label>
         <label>
-          作案手法（可选）
+          {confrontation ? "作案手法" : "作案手法（可选）"}
           <select
             value={props.draft.methodFactId}
             onChange={(event) => props.onChange({ ...props.draft, methodFactId: event.target.value })}
           >
-            <option value="">暂不判断（不影响提交）</option>
+            <option value="">
+              {confrontation ? "选择已发现的手法" : "暂不判断（不影响提交）"}
+            </option>
             {props.view.reportOptions.methodFacts.map((fact) => (
               <option key={fact.id} value={fact.id}>{fact.statement}</option>
             ))}
@@ -1538,9 +1639,11 @@ function ReportPanel(props: {
         </label>
       </div>
       <fieldset>
-        <legend>证据链</legend>
+        <legend>{confrontation ? "完整证据链" : "证据链"}</legend>
         <p className="report-choice-note">
-          这里只列出你已经获得的线索；至少勾选两条才能提交。勾选表示写入本次报告，并不代表线索尚未发现。
+          {confrontation
+            ? "当面对质必须逐条列入已发现的全部线索，不能留下断点。"
+            : "这里只列出你已经获得的线索；至少勾选两条才能提交。勾选表示写入本次报告，并不代表线索尚未发现。"}
         </p>
         <div className="checkbox-grid">
           {props.view.evidence.map((evidence) => (
@@ -1559,7 +1662,7 @@ function ReportPanel(props: {
         </div>
       </fieldset>
       <fieldset>
-        <legend>时间线</legend>
+        <legend>{confrontation ? "完整时间线" : "时间线"}</legend>
         {!props.view.reportOptions.hasCompleteEvidenceChain ? (
           <p className="locked-copy">必要证据尚未集齐，完整时间线暂无法重建；你仍可提前结案，但时间线项目不会计分。</p>
         ) : (
@@ -1585,23 +1688,28 @@ function ReportPanel(props: {
         )}
       </fieldset>
       <label className="reasoning-field">
-        推理陈述
+        {confrontation ? "向嫌疑人的陈述" : "推理陈述"}
         <textarea
           rows={6}
           value={props.draft.reasoning}
           onChange={(event) => props.onChange({ ...props.draft, reasoning: event.target.value })}
-          placeholder="至少用 10 个字说明你为什么锁定此人；动机、手法与时间线可在证据完整时补充。"
+          placeholder={
+            confrontation
+              ? "说明证据如何证明动机、手法与时间线，至少 10 个字。"
+              : "至少用 10 个字说明你为什么锁定此人；动机、手法与时间线可在证据完整时补充。"
+          }
         />
       </label>
       <button
         className="submit-report"
         disabled={props.busy || requirements.length > 0}
       >
-        封存并提交（唯一机会）
+        {confrontation ? "陈述证据，要求认罪" : "封存并提交（唯一机会）"}
       </button>
       {requirements.length > 0 && (
         <p className="report-requirements" aria-live="polite">
-          <strong>还不能提交：</strong>{requirements.join("；")}
+          <strong>{confrontation ? "还不能完成对质：" : "还不能提交："}</strong>
+          {requirements.join("；")}
         </p>
       )}
     </form>
@@ -1655,6 +1763,12 @@ function ReviewPanel(props: {
             : "提前结案成功：已锁定真凶，未完成的卷宗项目未计入得分。"
           : "本次指认未命中真凶，案件已按一次性结案规则封存。"}
       </p>
+      {review.confession && (
+        <section className="confession-record">
+          <span>嫌疑人供述</span>
+          <p>{review.confession}</p>
+        </section>
+      )}
       <section className="truth-summary">
         <div>
           <span>真凶</span>
@@ -2017,6 +2131,19 @@ function reportRequirements(report: ReportDraft) {
   return missing;
 }
 
+function confrontationRequirements(view: GameView, report: ReportDraft) {
+  const missing = reportRequirements(report);
+  if (!report.motiveFactId) missing.push("选择动机判断");
+  if (!report.methodFactId) missing.push("选择作案手法");
+  if (report.evidenceIds.length < view.evidence.length) {
+    missing.push("列入全部已发现线索");
+  }
+  if (report.timelineEventIds.length < view.reportOptions.timelineEvents.length) {
+    missing.push("勾选完整时间线");
+  }
+  return missing;
+}
+
 function reportHasCompleteDossier<T extends object>(report: { correct: T }) {
   return Object.values(report.correct).every(Boolean);
 }
@@ -2172,20 +2299,22 @@ function generationStageLabel(job: GenerationJobView) {
   );
 }
 
-function generationProgressText(job: GenerationJobView) {
-  if (job.status === "queued") {
-    return "正在为这起案件安排人物、地点与最初的疑点。";
-  }
-  return (
+function generationProgressText(job: GenerationJobView, statusTick = 0) {
+  const actions =
     {
-      starting: "案卷已展开，真相链正在从零开始成形。",
-      drafting: "人物、场景和关键线索正在逐一归位。",
-      validating: "正在确认每条线索都能指向同一个结论。",
-      repairing: "发现一处需要核对的细节，正在让证据链保持自洽。",
-      blind_solving: "另一条推理路径正在独立复盘案情。",
-      finalizing: "通过检验的案件正在封存，很快可以启封调查。",
-    }[job.stage] ?? "案件正在细致打磨，请稍候。"
-  );
+      queued: ["正在登记委托", "正在调度调查组", "正在领取现场通行证"],
+      starting: ["正在封锁现场", "正在核对报案记录", "正在布置取证路线"],
+      drafting: ["正在调查案发地", "正在收集线索", "正在记录目击证言"],
+      validating: ["正在比对物证", "正在复核证词", "正在串联时间线"],
+      repairing: ["正在追查矛盾证词", "正在补齐证据链", "正在重新勘验现场"],
+      blind_solving: [
+        "正在锁定嫌疑人",
+        "正在追查嫌犯行踪",
+        "正在押解嫌犯接受讯问",
+      ],
+      finalizing: ["正在整理卷宗", "正在提交结案报告", "正在归档物证"],
+    }[job.status === "queued" ? "queued" : job.stage] ?? ["正在调阅案件档案"];
+  return actions[statusTick % actions.length] ?? actions[0] ?? "正在推进案情";
 }
 
 function generationFailureMessage(_job: GenerationJobView) {
@@ -2203,25 +2332,6 @@ function isGenerationTerminal(job: GenerationJobView) {
 function generationActualProgress(job: GenerationJobView) {
   if (job.status === "succeeded") return 100;
   return Math.max(0, Math.min(100, job.progress));
-}
-
-function generationDisplayTarget(
-  status: GenerationJobView["status"],
-  stage: GenerationJobView["stage"],
-  actualProgress: number,
-) {
-  const stageTarget =
-    status === "queued"
-      ? 7
-      : {
-          starting: 14,
-          drafting: 58,
-          validating: 76,
-          repairing: 84,
-          blind_solving: 93,
-          finalizing: 98,
-        }[stage] ?? 16;
-  return Math.min(98, Math.max(actualProgress, stageTarget));
 }
 
 function generationTerminalText(job: GenerationJobView) {

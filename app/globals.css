@@ -542,11 +542,15 @@ textarea::placeholder {
   top: -65%;
   width: 32%;
   height: 230%;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acid) 8%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acid) 22%, transparent), transparent);
   content: "";
-  opacity: 0.65;
+  opacity: 0;
   pointer-events: none;
   transform: translateX(-190%) rotate(14deg);
+}
+
+.generation-progress.is-active::before {
+  opacity: 0.85;
   animation: generation-document-scan 4.8s ease-in-out infinite;
 }
 
@@ -573,9 +577,14 @@ textarea::placeholder {
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  background: var(--paper-muted);
+  box-shadow: none;
+  content: "";
+}
+
+.generation-progress.is-active .generation-progress-heading > span::before {
   background: var(--acid);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--acid) 50%, transparent);
-  content: "";
   animation: generation-beacon 1.7s ease-out infinite;
 }
 
@@ -594,16 +603,26 @@ textarea::placeholder {
   background: repeating-linear-gradient(90deg, #292d27 0 10px, #20241f 10px 13px);
 }
 
+.generation-progress.is-active .generation-progress-track {
+  border-color: color-mix(in srgb, var(--acid) 56%, var(--rule-bright));
+  box-shadow: inset 0 0 8px color-mix(in srgb, var(--acid) 18%, transparent);
+}
+
 .generation-progress-track::before {
   position: absolute;
   z-index: 0;
   top: 0;
   bottom: 0;
-  width: 28%;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--paper) 28%, transparent), transparent);
+  width: 18%;
+  background: linear-gradient(90deg, transparent, rgba(230, 238, 158, 0.95), transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--acid) 70%, transparent);
   content: "";
-  opacity: 0.8;
+  opacity: 0;
   transform: translateX(-150%);
+}
+
+.generation-progress.is-active .generation-progress-track::before {
+  opacity: 1;
   animation: generation-track-scan 2.3s linear infinite;
 }
 
@@ -626,6 +645,9 @@ textarea::placeholder {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 235, 0.8), transparent);
   content: "";
   transform: translateX(-150%) skewX(-22deg);
+}
+
+.generation-progress.is-active .generation-progress-track > span::after {
   animation: generation-progress-sheen 1.8s linear infinite;
 }
 
@@ -640,13 +662,6 @@ textarea::placeholder {
 
 .generation-progress.is-succeeded {
   border-color: color-mix(in srgb, var(--acid) 55%, var(--rule-bright));
-}
-
-.generation-progress.is-succeeded::before,
-.generation-progress.is-succeeded .generation-progress-heading > span::before,
-.generation-progress.is-succeeded .generation-progress-track::before,
-.generation-progress.is-succeeded .generation-progress-track > span::after {
-  animation: none;
 }
 
 .generation-progress.is-failed {
@@ -1589,6 +1604,15 @@ textarea::placeholder {
   font-size: 11px;
 }
 
+.deduction-source {
+  display: block;
+  margin-top: 7px;
+  color: var(--signal-bright);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
 .manual-notes textarea {
   height: calc(100% - 52px);
   min-height: 190px;
@@ -1610,6 +1634,45 @@ textarea::placeholder {
   padding: 8px 12px;
   color: var(--paper-muted);
   font-size: 12px;
+}
+
+.confrontation-invite,
+.confrontation-rebuttal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: -18px 0 30px;
+  border: 1px solid var(--rule-bright);
+  padding: 15px 16px;
+  background: rgba(176, 73, 48, 0.08);
+}
+
+.confrontation-invite strong,
+.confrontation-rebuttal > span {
+  color: var(--signal-bright);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.confrontation-invite p,
+.confrontation-rebuttal p {
+  margin: 6px 0 0;
+  color: var(--paper-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.confrontation-invite button {
+  flex: 0 0 auto;
+  min-height: 38px;
+}
+
+.confrontation-rebuttal {
+  display: block;
+  border-left: 3px solid var(--signal);
 }
 
 .report-fields {
@@ -1712,6 +1775,29 @@ textarea::placeholder {
   padding-left: 11px;
   color: var(--paper-muted);
   font-size: 12px;
+}
+
+.confession-record {
+  max-width: 720px;
+  margin: -16px 0 42px;
+  border: 1px solid color-mix(in srgb, var(--signal) 56%, var(--rule-bright));
+  border-left: 3px solid var(--signal);
+  padding: 16px 18px;
+  background: rgba(176, 73, 48, 0.08);
+}
+
+.confession-record span {
+  color: var(--signal-bright);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.confession-record p {
+  margin: 9px 0 0;
+  color: var(--paper-muted);
+  font-size: 13px;
+  line-height: 1.8;
 }
 
 /* Case review */
@@ -2097,6 +2183,8 @@ textarea::placeholder {
 
   .notebook-grid { grid-template-columns: 1fr; }
   .checkbox-grid { grid-template-columns: 1fr; }
+  .confrontation-invite { align-items: stretch; flex-direction: column; }
+  .confrontation-invite button { width: 100%; }
   .truth-summary { grid-template-columns: 1fr; }
   .truth-summary > div + div { border-top: 1px solid var(--rule-bright); border-left: 0; }
   .verdict-stamp { position: static; display: inline-block; margin-bottom: 22px; }

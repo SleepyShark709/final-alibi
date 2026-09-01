@@ -233,18 +233,11 @@ export function validatePublishableCaseArtifact(
   const report = validateCaseArtifact(caseArtifact);
   const issues = [...report.issues];
 
-  if (caseArtifact.scenes.length !== 3) {
+  if (caseArtifact.scenes.length < 3) {
     issues.push({
       code: "invalid_scene_count",
       path: "scenes",
-      message: `expected exactly 3 scenes but found ${caseArtifact.scenes.length}`,
-    });
-  }
-  if (caseArtifact.evidence.length < 8 || caseArtifact.evidence.length > 12) {
-    issues.push({
-      code: "invalid_evidence_count",
-      path: "evidence",
-      message: `expected 8 to 12 evidence items but found ${caseArtifact.evidence.length}`,
+      message: `expected at least 3 scenes but found ${caseArtifact.scenes.length}`,
     });
   }
   if (caseArtifact.solution.requiredEvidenceIds.length < 4) {
@@ -316,6 +309,34 @@ export function validatePublishableCaseArtifact(
   const culprit = caseArtifact.characters.find(
     (character) => character.id === caseArtifact.culpritId,
   );
+  if (culprit && caseArtifact.scenes.length >= 3) {
+    const reachableEvidenceIds = findReachableEvidenceIds(caseArtifact);
+    const directSceneEvidence = caseArtifact.evidence.filter(
+      (evidence) =>
+        reachableEvidenceIds.has(evidence.id) &&
+        Boolean(evidence.discovery.sceneId) &&
+        (evidence.kind === "physical" || evidence.kind === "forensic"),
+    );
+    const directCulpritMentions = directSceneEvidence.filter((evidence) =>
+      `${evidence.name}\n${evidence.description}`.includes(culprit.name),
+    );
+    if (directCulpritMentions.length >= 2) {
+      issues.push({
+        code: "premature_direct_evidence_reveal",
+        path: "evidence",
+        message:
+          "multiple direct scene physical or forensic clues explicitly name the culprit",
+      });
+    }
+    if (directEvidenceLocksCulprit(caseArtifact, directSceneEvidence, culprit.id)) {
+      issues.push({
+        code: "premature_direct_evidence_lock",
+        path: "evidence",
+        message:
+          "one to three direct scene physical or forensic clues independently identify the culprit",
+      });
+    }
+  }
   const initiallyPublicText = [
     caseArtifact.title,
     caseArtifact.briefing,
@@ -394,6 +415,56 @@ function collectTextValues(value: unknown): string[] {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function directEvidenceLocksCulprit(
+  caseArtifact: CaseArtifact,
+  evidence: CaseArtifact["evidence"],
+  culpritId: string,
+) {
+  const otherSuspectIds = caseArtifact.characters
+    .filter(
+      (character) =>
+        character.roleTier === "suspect" && character.id !== culpritId,
+    )
+    .map((character) => character.id);
+  if (otherSuspectIds.length === 0) return false;
+
+  const suspectBitById = new Map(
+    otherSuspectIds.map((suspectId, index) => [suspectId, 1 << index]),
+  );
+  const fullMask = (1 << otherSuspectIds.length) - 1;
+  const shortestChainByMask = new Map<number, string[]>([[0, []]]);
+
+  for (const item of evidence) {
+    if (item.excludesCharacterIds.includes(culpritId)) continue;
+    const mask = item.excludesCharacterIds.reduce(
+      (result, suspectId) => result | (suspectBitById.get(suspectId) ?? 0),
+      0,
+    );
+    if (mask === 0) continue;
+
+    for (const [coveredMask, evidenceIds] of [...shortestChainByMask]) {
+      if (evidenceIds.length >= 3) continue;
+      const nextEvidenceIds = [...evidenceIds, item.id];
+      const nextMask = coveredMask | mask;
+      if (nextMask === fullMask) {
+        const result = solveCaseWithEvidenceIds(caseArtifact, nextEvidenceIds);
+        if (
+          result.candidateIds.length === 1 &&
+          result.candidateIds[0] === culpritId
+        ) {
+          return true;
+        }
+      }
+      const prior = shortestChainByMask.get(nextMask);
+      if (!prior || nextEvidenceIds.length < prior.length) {
+        shortestChainByMask.set(nextMask, nextEvidenceIds);
+      }
+    }
+  }
+
+  return false;
 }
 
 interface EntityReference {
