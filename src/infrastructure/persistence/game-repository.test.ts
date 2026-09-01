@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { GameService } from "@/application/game/game-service";
 import { tutorialCase } from "@/content/tutorial/tutorial-case";
 import { parseCaseArtifact } from "@/domain/case/case-artifact";
 import { performInvestigation } from "@/domain/game/game-runtime";
@@ -177,6 +178,23 @@ describe("GameRepository", () => {
     await expect(repository.registerCase(conflicting, "imported")).rejects.toMatchObject({
       code: "case_id_conflict",
     });
+  });
+
+  it("publishes the current tutorial release beside a legacy tutorial ledger", async () => {
+    const legacyTutorial = parseCaseArtifact({
+      ...tutorialCase,
+      id: "case_rainy_study",
+      title: "雨夜书房（旧版）",
+    });
+    await repository.registerCase(legacyTutorial, "tutorial");
+
+    await expect(new GameService(repository).initializeContent()).resolves.toBeUndefined();
+
+    const cases = await repository.listReadyCases();
+    expect(cases.map((caseItem) => caseItem.id).sort()).toEqual([
+      "case_rainy_study",
+      "case_rainy_study_v2",
+    ]);
   });
 
   it("queues durable work and records model telemetry", async () => {
