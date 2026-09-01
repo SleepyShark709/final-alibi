@@ -180,20 +180,14 @@ describe("GameRepository", () => {
     });
   });
 
-  it("publishes the current tutorial release beside a legacy tutorial ledger", async () => {
-    const legacyTutorial = parseCaseArtifact({
-      ...tutorialCase,
-      id: "case_rainy_study",
-      title: "雨夜书房（旧版）",
-    });
-    await repository.registerCase(legacyTutorial, "tutorial");
-
-    await expect(new GameService(repository).initializeContent()).resolves.toBeUndefined();
+  it("initializes one stable tutorial ledger idempotently", async () => {
+    const service = new GameService(repository);
+    await service.initializeContent();
+    await expect(service.initializeContent()).resolves.toBeUndefined();
 
     const cases = await repository.listReadyCases();
-    expect(cases.map((caseItem) => caseItem.id).sort()).toEqual([
-      "case_rainy_study",
-      "case_rainy_study_v2",
+    expect(cases.filter((caseItem) => caseItem.source === "tutorial")).toEqual([
+      expect.objectContaining({ id: "case_rainy_study", title: "雨夜书房" }),
     ]);
   });
 
