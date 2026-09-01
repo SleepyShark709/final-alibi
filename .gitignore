@@ -1,0 +1,7 @@
+.env
+.env.local
+.next/
+data/
+node_modules/
+test-results/
+tsconfig.tsbuildinfo
