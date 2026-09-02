@@ -267,6 +267,25 @@ export function validatePublishableCaseArtifact(
       message: "expected at least one testimony discoverable through character dialogue",
     });
   }
+  caseArtifact.evidence.forEach((evidence, evidenceIndex) => {
+    if (evidence.discovery.method !== "interview") return;
+    if ((evidence.discovery.dialogueAliases?.length ?? 0) < 3) {
+      issues.push({
+        code: "insufficient_interview_dialogue_aliases",
+        path: `evidence[${evidenceIndex}].discovery.dialogueAliases`,
+        message:
+          "expected at least three natural-language dialogue aliases for interview evidence",
+      });
+    }
+    if (!evidence.discovery.dialogueUtterance) {
+      issues.push({
+        code: "missing_interview_dialogue_utterance",
+        path: `evidence[${evidenceIndex}].discovery.dialogueUtterance`,
+        message:
+          "expected a first-person dialogue utterance for interview evidence",
+      });
+    }
+  });
   const requiredEvidenceIds = new Set(caseArtifact.solution.requiredEvidenceIds);
   const requiredInterviewEvidence = caseArtifact.evidence.filter(
     (evidence) =>

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CaseReview } from "@/domain/game/game-runtime";
 import { assignPortraits } from "@/ui/portraits";
+import { generationFailureMessage } from "@/ui/generation-failure";
 
 type Panel = "briefing" | "scene" | "dialogue" | "notebook" | "report" | "review";
 
@@ -2292,7 +2293,7 @@ function generationStageLabel(job: GenerationJobView) {
       starting: "正在展开案件设定",
       drafting: "正在编织案情",
       validating: "正在核对线索",
-      repairing: "正在整理关键细节",
+      repairing: "正在针对校验问题进行局部修复",
       blind_solving: "正在独立推演",
       finalizing: "正在封存卷宗",
     }[job.stage] ?? "正在细致整理案件"
@@ -2315,10 +2316,6 @@ function generationProgressText(job: GenerationJobView, statusTick = 0) {
       finalizing: ["正在整理卷宗", "正在提交结案报告", "正在归档物证"],
     }[job.status === "queued" ? "queued" : job.stage] ?? ["正在调阅案件档案"];
   return actions[statusTick % actions.length] ?? actions[0] ?? "正在推进案情";
-}
-
-function generationFailureMessage(_job: GenerationJobView) {
-  return "这起案件暂时未能完成生成。请重新提交，或换一个更具体的主题。";
 }
 
 function isGenerationTerminal(job: GenerationJobView) {

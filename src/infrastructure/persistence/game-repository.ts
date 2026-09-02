@@ -8,6 +8,7 @@ import {
 } from "@/domain/case/case-artifact";
 import { validatePublishableCaseArtifact } from "@/domain/case/case-validator";
 import {
+  reconcileDisclosedInterviewEvidence,
   startGame,
   type GameEvent,
   type GameSession,
@@ -355,9 +356,15 @@ export class GameRepository {
       );
     }
 
+    const caseArtifact = parseCaseArtifact(caseRow.artifactJson);
+    const session = parseStoredSession(
+      sessionRow.stateJson,
+      sessionRow.id,
+      sessionRow.caseId,
+    );
     return {
-      caseArtifact: parseCaseArtifact(caseRow.artifactJson),
-      session: parseStoredSession(sessionRow.stateJson, sessionRow.id, sessionRow.caseId),
+      caseArtifact,
+      session: reconcileDisclosedInterviewEvidence(caseArtifact, session),
     };
   }
 
@@ -474,14 +481,16 @@ export class GameRepository {
         );
       }
 
+      const caseArtifact = parseCaseArtifact(caseRow.artifactJson);
+      const session = parseStoredSession(
+        sessionRow.stateJson,
+        sessionRow.id,
+        sessionRow.caseId,
+      );
       return {
         status: "accepted",
-        caseArtifact: parseCaseArtifact(caseRow.artifactJson),
-        session: parseStoredSession(
-          sessionRow.stateJson,
-          sessionRow.id,
-          sessionRow.caseId,
-        ),
+        caseArtifact,
+        session: reconcileDisclosedInterviewEvidence(caseArtifact, session),
         baseRevision: sessionRow.revision,
       };
     });

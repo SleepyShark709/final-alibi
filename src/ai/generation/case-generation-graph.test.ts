@@ -6,7 +6,10 @@ import type {
   StructuredModelResult,
 } from "@/ai/model-provider";
 import { tutorialCase } from "@/content/tutorial/tutorial-case";
-import { parseCaseArtifact } from "@/domain/case/case-artifact";
+import {
+  caseArtifactSchema,
+  parseCaseArtifact,
+} from "@/domain/case/case-artifact";
 import { validatePublishableCaseArtifact } from "@/domain/case/case-validator";
 
 import {
@@ -14,7 +17,7 @@ import {
   compileMinimumSolutionChain,
   createCaseGenerationGraph,
 } from "./case-generation-graph";
-import { buildBlindSolveMessages } from "./generation-prompts";
+import { buildBlindSolveMessages, buildCaseDraftMessages } from "./generation-prompts";
 
 describe("case generation graph", () => {
   it("publishes a semantically valid case only after an independent blind solve", async () => {
@@ -59,8 +62,8 @@ describe("case generation graph", () => {
     expect(progress).toEqual([
       { stage: "drafting", progress: 10 },
       { stage: "validating", progress: 25 },
-      { stage: "blind_solving", progress: 80 },
-      { stage: "finalizing", progress: 92 },
+      { stage: "blind_solving", progress: 92 },
+      { stage: "finalizing", progress: 96 },
     ]);
   });
 
@@ -70,7 +73,7 @@ describe("case generation graph", () => {
     invalid.scenes = invalid.scenes.slice(0, 2);
     const provider = new ScriptedProvider([
       invalid,
-      valid,
+      { scenes: [valid.scenes[2]] },
       blindResult(valid.culpritId),
     ]);
     const graph = createCaseGenerationGraph(provider);
@@ -84,10 +87,163 @@ describe("case generation graph", () => {
       attempts: 2,
       calls: [
         "case_artifact",
-        "repaired_case_artifact",
+        "case_artifact_repair_patch",
         "blind_case_solution",
       ],
       finalId: "case_generated_two",
+    });
+  });
+
+  it("repairs an invalid first-draft lie strategy with a compact patch", async () => {
+    const valid = generatedTutorial("case_generated_lie_rule", "seed-lie-rule");
+    const malformed = structuredClone(valid) as unknown as {
+      characters: Array<{
+        id: string;
+        lieRules: Array<{
+          factId: string;
+          strategy: string;
+          coverStatement: string;
+        }>;
+      }>;
+    };
+    const characterIndex = malformed.characters.findIndex(
+      (character) => character.lieRules.length > 0,
+    );
+    if (characterIndex < 0) {
+      throw new Error("Tutorial case requires a character with a lie rule");
+    }
+    const malformedCharacter = malformed.characters[characterIndex]!;
+    malformedCharacter.lieRules[0]!.strategy = "fabricate_alibi";
+    const repairedCharacter = valid.characters[characterIndex]!;
+    const provider = new ScriptedProvider([
+      structuredOutputValidationError(malformed),
+      {
+        characters: [
+          {
+            id: repairedCharacter.id,
+            lieRules: repairedCharacter.lieRules,
+          },
+        ],
+      },
+      blindResult(valid.culpritId),
+    ]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("seed-lie-rule"));
+
+    expect({
+      attempts: result.attempt,
+      finalId: result.finalArtifact?.id,
+      calls: provider.requests,
+    }).toEqual({
+      attempts: 2,
+      finalId: "case_generated_lie_rule",
+      calls: [
+        "case_artifact",
+        "case_artifact_repair_patch",
+        "blind_case_solution",
+      ],
+    });
+    expect(result.modelCalls[0]?.response).toMatchObject({
+      structuredOutputValidation: {
+        schemaName: "case_artifact",
+        issues: [
+          expect.objectContaining({
+            path: ["characters", characterIndex, "lieRules", 0, "strategy"],
+            received: '"fabricate_alibi"',
+          }),
+        ],
+      },
+    });
+  });
+
+  it("preflights reference closure and the decisive evidence chain before drafting", () => {
+    const messages = buildCaseDraftMessages({
+      seed: "seed-preflight",
+      theme: "现代宅邸中的封闭空间案件",
+      difficulty: "standard",
+    });
+
+    expect(messages[0]?.content).toContain("输出前必须先完成以下结构预检");
+    expect(messages[0]?.content).toContain("所有引用都必须来自已列出的实体 ID");
+    expect(messages[0]?.content).toContain("用这 5 条必要证据独立演算一次");
+  });
+
+  it("repairs a localized dangling reference with a compact patch instead of another full case", async () => {
+    const valid = generatedTutorial("case_generated_patch", "seed-patch");
+    const invalid = structuredClone(valid);
+    invalid.scenes[0]!.objects[0]!.evidenceIds = ["evidence_missing"];
+    const provider = new ScriptedProvider([
+      invalid,
+      {
+        sceneObjects: [
+          { sceneId: valid.scenes[0]!.id, ...valid.scenes[0]!.objects[0] },
+        ],
+      },
+      blindResult(valid.culpritId),
+    ]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("seed-patch"));
+
+    expect({
+      attempts: result.attempt,
+      finalId: result.finalArtifact?.id,
+      valid: result.finalArtifact
+        ? validatePublishableCaseArtifact(result.finalArtifact).valid
+        : false,
+      calls: provider.requests,
+    }).toEqual({
+      attempts: 2,
+      finalId: "case_generated_patch",
+      valid: true,
+      calls: [
+        "case_artifact",
+        "case_artifact_repair_patch",
+        "blind_case_solution",
+      ],
+    });
+    expect(provider.requestDetails[1]).toMatchObject({
+      schemaName: "case_artifact_repair_patch",
+      tier: "pro",
+      maxTokens: 3_200,
+    });
+    expect(provider.requestDetails[1]?.messages[0]?.content).toContain("局部修复补丁");
+    const repairContent = provider.requestDetails[1]?.messages[1]?.content ?? "{}";
+    const repairPayload = JSON.parse(repairContent);
+    expect(repairPayload).toHaveProperty("repairSnapshot");
+    expect(repairPayload).not.toHaveProperty("draft");
+    expect(repairContent.length).toBeLessThan(JSON.stringify(invalid).length);
+  });
+
+  it("retries a malformed compact patch before rejecting the case", async () => {
+    const valid = generatedTutorial("case_generated_patch_retry", "seed-patch-retry");
+    const invalid = structuredClone(valid);
+    invalid.scenes[0]!.objects[0]!.evidenceIds = ["evidence_missing"];
+    const provider = new ScriptedProvider([
+      invalid,
+      { unsupportedPatchField: true },
+      {
+        sceneObjects: [
+          { sceneId: valid.scenes[0]!.id, ...valid.scenes[0]!.objects[0] },
+        ],
+      },
+      blindResult(valid.culpritId),
+    ]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("seed-patch-retry"));
+
+    expect({
+      attempts: result.attempt,
+      finalId: result.finalArtifact?.id,
+      calls: provider.requests,
+    }).toEqual({
+      attempts: 3,
+      finalId: "case_generated_patch_retry",
+      calls: [
+        "case_artifact",
+        "case_artifact_repair_patch",
+        "case_artifact_repair_patch",
+        "blind_case_solution",
+      ],
     });
   });
 
@@ -125,6 +281,8 @@ describe("case generation graph", () => {
       method: "interview",
       characterId: "character_chen_mo",
       actionAliases: ["询问陈默案发时在哪里", "追问医学直播"],
+      dialogueAliases: ["案发时你在哪里", "你当晚在哪", "直播能证明吗"],
+      dialogueUtterance: "我当晚一直在诊所直播，可以提供回放记录。",
       prerequisiteEvidenceIds: [],
     };
     draft.solution.requiredEvidenceIds = draft.evidence
@@ -165,7 +323,14 @@ describe("case generation graph", () => {
     const provider = new ScriptedProvider([
       artifact,
       blindResult("character_shen_lan"),
-      artifact,
+      {
+        evidence: [
+          {
+            id: artifact.evidence[0]!.id,
+            description: `${artifact.evidence[0]!.description} 这条记录与其他证据相互印证。`,
+          },
+        ],
+      },
       blindResult(artifact.culpritId),
     ]);
     const graph = createCaseGenerationGraph(provider);
@@ -181,10 +346,14 @@ describe("case generation graph", () => {
       calls: [
         "case_artifact",
         "blind_case_solution",
-        "repaired_case_artifact",
+        "case_artifact_repair_patch",
         "blind_case_solution",
       ],
     });
+    const blindRepairPayload = JSON.parse(
+      provider.requestDetails[2]?.messages[1]?.content ?? "{}",
+    );
+    expect(blindRepairPayload).toHaveProperty("repairSnapshot.playerFacingText");
   });
 
   it("rejects an invalid case after the finite repair budget", async () => {
@@ -237,6 +406,12 @@ describe("case generation graph", () => {
 
 class ScriptedProvider implements StructuredModelProvider {
   readonly requests: string[] = [];
+  readonly requestDetails: Array<{
+    schemaName: string;
+    tier: string;
+    maxTokens: number | undefined;
+    messages: StructuredModelRequest<Record<string, unknown>>["messages"];
+  }> = [];
 
   constructor(private readonly responses: unknown[]) {}
 
@@ -244,8 +419,15 @@ class ScriptedProvider implements StructuredModelProvider {
     request: StructuredModelRequest<T>,
   ): Promise<StructuredModelResult<T>> {
     this.requests.push(request.schemaName);
+    this.requestDetails.push({
+      schemaName: request.schemaName,
+      tier: request.tier,
+      maxTokens: request.maxTokens,
+      messages: request.messages,
+    });
     const response = this.responses.shift();
     if (response === undefined) throw new Error("No scripted response remains");
+    if (response instanceof Error) throw response;
     return {
       value: request.schema.parse(response),
       model: "mock-deepseek-pro",
@@ -268,8 +450,59 @@ function initialState(seed: string) {
     blindSolve: null,
     finalArtifact: null,
     rejectionReason: null,
+    formatRepairTargets: [],
     modelCalls: [],
   };
+}
+
+function structuredOutputValidationError(input: unknown) {
+  const parsed = caseArtifactSchema.safeParse(input);
+  if (parsed.success) {
+    throw new Error("Expected malformed case artifact to fail schema validation");
+  }
+  return Object.assign(
+    new Error(
+      'DeepSeek JSON for structured output "case_artifact" failed schema validation',
+    ),
+    {
+      name: "StructuredOutputValidationError",
+      schemaName: "case_artifact",
+      input,
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path,
+        message: issue.message,
+        received: formatReceivedValue(readPath(input, issue.path)),
+      })),
+      model: "mock-deepseek-pro",
+      usage: { inputTokens: 1_000, cachedInputTokens: 0, outputTokens: 500 },
+      rawResponse: { content: JSON.stringify(input) },
+    },
+  );
+}
+
+function readPath(input: unknown, path: ReadonlyArray<PropertyKey>) {
+  let current = input;
+  for (const segment of path) {
+    if (Array.isArray(current) && typeof segment === "number") {
+      current = current[segment];
+      continue;
+    }
+    if (
+      current &&
+      typeof current === "object" &&
+      typeof segment === "string"
+    ) {
+      current = (current as Record<string, unknown>)[segment];
+      continue;
+    }
+    return undefined;
+  }
+  return current;
+}
+
+function formatReceivedValue(value: unknown) {
+  const serialized = JSON.stringify(value);
+  return serialized === undefined ? "undefined" : serialized;
 }
 
 function generatedTutorial(id: string, seed: string) {

@@ -675,6 +675,11 @@ textarea::placeholder {
   background: var(--danger);
 }
 
+.generation-progress.is-failed > p,
+.lobby-error > span {
+  overflow-wrap: anywhere;
+}
+
 @keyframes generation-document-scan {
   0%, 32% { transform: translateX(-190%) rotate(14deg); }
   67%, 100% { transform: translateX(430%) rotate(14deg); }

@@ -37,6 +37,7 @@ export const dialogueGuardSchema = z
         "prompt_injection_compliance",
         "role_break",
         "unsupported_claim",
+        "repeated_response",
       ]),
     ),
     feedback: z.string().trim().max(1_000),

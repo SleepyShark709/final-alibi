@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { MemorySaver } from "@langchain/langgraph";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   StructuredModelProvider,
@@ -97,6 +97,50 @@ describe("CaseGenerationService", () => {
     expect(job.result?.estimatedCostMicrosCny).toEqual(expect.any(Number));
     expect(Number(job.result?.estimatedCostMicrosCny)).toBeGreaterThan(0);
   });
+
+  it("persists and logs actionable details when a generation job fails", async () => {
+    const identity = await repository.createAnonymousIdentity();
+    const service = new CaseGenerationService(
+      repository,
+      new FailingProvider(),
+      new MemorySaver(),
+    );
+    const queued = await service.enqueue(identity.playerId, {
+      seed: "service-failure-seed",
+      theme: "雨夜宅邸",
+      difficulty: "standard",
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const processed = await processNextCaseGenerationJob(repository, service);
+      const job = await repository.getJob(identity.playerId, queued.jobId);
+
+      expect(processed).toEqual({ jobId: queued.jobId, status: "failed" });
+      expect(job).toMatchObject({
+        status: "failed",
+        error:
+          "Error [status=400, code=MODEL_VALIDATION_FAILED]: model returned an invalid case artifact",
+      });
+      expect(errorLog).toHaveBeenCalledWith(
+        "[generation-worker] job failed",
+        expect.objectContaining({
+          jobId: queued.jobId,
+          attempt: 1,
+          maxAttempts: 3,
+          retryable: false,
+          error: expect.objectContaining({
+            name: "Error",
+            message: "model returned an invalid case artifact",
+            status: 400,
+            code: "MODEL_VALIDATION_FAILED",
+          }),
+        }),
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
 });
 
 class ScriptedProvider implements StructuredModelProvider {
@@ -113,5 +157,16 @@ class ScriptedProvider implements StructuredModelProvider {
       usage: { inputTokens: 1_000, cachedInputTokens: 0, outputTokens: 500 },
       rawResponse: { schema: request.schemaName },
     };
+  }
+}
+
+class FailingProvider implements StructuredModelProvider {
+  async invokeStructured<T extends Record<string, unknown>>(
+    _request: StructuredModelRequest<T>,
+  ): Promise<StructuredModelResult<T>> {
+    throw Object.assign(new Error("model returned an invalid case artifact"), {
+      code: "MODEL_VALIDATION_FAILED",
+      status: 400,
+    });
   }
 }

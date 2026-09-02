@@ -328,6 +328,35 @@ describe("validateCaseArtifact", () => {
     });
   });
 
+  it("requires deterministic prompts and a spoken response for each interview evidence", async () => {
+    const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
+    const caseArtifact = structuredClone(tutorialCase);
+    const evidenceIndex = caseArtifact.evidence.findIndex(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    );
+    const testimony = caseArtifact.evidence[evidenceIndex];
+    if (!testimony || evidenceIndex < 0) {
+      throw new Error("Tutorial testimony is missing");
+    }
+    testimony.discovery.dialogueAliases = ["谁送了茶？"];
+    delete testimony.discovery.dialogueUtterance;
+
+    const issues = validatePublishableCaseArtifact(caseArtifact).issues;
+
+    expect(issues).toContainEqual({
+      code: "insufficient_interview_dialogue_aliases",
+      path: `evidence[${evidenceIndex}].discovery.dialogueAliases`,
+      message:
+        "expected at least three natural-language dialogue aliases for interview evidence",
+    });
+    expect(issues).toContainEqual({
+      code: "missing_interview_dialogue_utterance",
+      path: `evidence[${evidenceIndex}].discovery.dialogueUtterance`,
+      message:
+        "expected a first-person dialogue utterance for interview evidence",
+    });
+  });
+
   it("accepts the tutorial as a fully publishable case", async () => {
     const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
 

@@ -192,6 +192,210 @@ describe("deterministic game runtime", () => {
     });
   });
 
+  it("unlocks a legacy witness testimony for a natural sighting question", () => {
+    const legacyCase = structuredClone(tutorialCase);
+    const testimony = legacyCase.evidence.find(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    );
+    if (!testimony) throw new Error("Tutorial testimony is missing");
+    testimony.description = "罗芳称看到李闻舟主动接过茶盘，并独自前往二楼。";
+    testimony.discovery.dialogueAliases = [];
+    delete testimony.discovery.dialogueUtterance;
+
+    const result = recordDialogueTurn(legacyCase, newSession(), {
+      commandId: "command_legacy_witness_sighting",
+      characterId: "character_luo_fang",
+      playerText: "你那天有见到其他人么",
+      response: {
+        utterance: "我可以说出自己当时看到的情况。",
+        demeanor: "guarded",
+        disclosedClaimIds: [],
+        memorySummary: "侦探问及我当晚看到的人。",
+        stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+      },
+    });
+
+    expect(result.outcome.discoveredEvidenceIds).toEqual([
+      "evidence_housekeeper_testimony",
+    ]);
+  });
+
+  it("lets a reassured stalled legacy witness disclose their only testimony", () => {
+    const legacyCase = structuredClone(tutorialCase);
+    const testimony = legacyCase.evidence.find(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    );
+    if (!testimony) throw new Error("Tutorial testimony is missing");
+    testimony.discovery.dialogueAliases = [];
+    delete testimony.discovery.dialogueUtterance;
+    const session = {
+      ...newSession(),
+      dialogue: [
+        {
+          commandId: "command_legacy_witness_fear",
+          at: startedAt,
+          characterId: "character_luo_fang",
+          playerText: "你那天看到谁了吗？",
+          utterance: "我确实看到了一些事情，但很害怕，说出来会有麻烦。",
+          demeanor: "guarded" as const,
+          disclosedClaimIds: [],
+          discoveredEvidenceIds: [],
+        },
+      ],
+    };
+
+    const result = recordDialogueTurn(legacyCase, session, {
+      commandId: "command_reassure_legacy_witness",
+      characterId: "character_luo_fang",
+      playerText: "说出来，我会保证你的安全。",
+      response: {
+        utterance: "我愿意说明自己当时看到的情况。",
+        demeanor: "cooperative",
+        disclosedClaimIds: [],
+        memorySummary: "侦探承诺会保护我。",
+        stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+      },
+    });
+
+    expect(result.outcome.discoveredEvidenceIds).toEqual([
+      "evidence_housekeeper_testimony",
+    ]);
+  });
+
+  it("records legacy testimony when the reply substantively discloses it", () => {
+    const legacyCase = structuredClone(tutorialCase);
+    const testimony = legacyCase.evidence.find(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    );
+    if (!testimony) throw new Error("Tutorial testimony is missing");
+    testimony.description = "罗芳称看到李闻舟从顾明远书房方向匆匆离开。";
+    testimony.discovery.dialogueAliases = [];
+    delete testimony.discovery.dialogueUtterance;
+
+    const result = recordDialogueTurn(legacyCase, newSession(), {
+      commandId: "command_legacy_reply_discloses_testimony",
+      characterId: "character_luo_fang",
+      playerText: "我知道你看见了李闻舟，你不需要害怕。",
+      response: {
+        utterance:
+          "我……我是看到了李闻舟从顾明远书房那边出来，但不确定他是不是凶手。",
+        demeanor: "guarded",
+        disclosedClaimIds: [],
+        memorySummary: "我承认看到李闻舟从书房方向出来。",
+        stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+      },
+    });
+
+    expect(result.outcome.discoveredEvidenceIds).toEqual([
+      "evidence_housekeeper_testimony",
+    ]);
+  });
+
+  it("does not unlock testimony from a vague stalled reply", () => {
+    const legacyCase = structuredClone(tutorialCase);
+    const testimony = legacyCase.evidence.find(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    );
+    if (!testimony) throw new Error("Tutorial testimony is missing");
+    testimony.description = "罗芳称看到李闻舟从顾明远书房方向匆匆离开。";
+    testimony.discovery.dialogueAliases = [];
+    delete testimony.discovery.dialogueUtterance;
+
+    const result = recordDialogueTurn(legacyCase, newSession(), {
+      commandId: "command_legacy_reply_is_vague",
+      characterId: "character_luo_fang",
+      playerText: "我知道你看见了李闻舟，你不需要害怕。",
+      response: {
+        utterance: "我确实看到了一些事情，但我现在很害怕。",
+        demeanor: "guarded",
+        disclosedClaimIds: [],
+        memorySummary: "我仍然害怕，没有说出具体内容。",
+        stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+      },
+    });
+
+    expect(result.outcome.discoveredEvidenceIds).toEqual([]);
+  });
+
+  it("projects historically disclosed testimony into the evidence book and review", () => {
+    const legacyCase = structuredClone(tutorialCase);
+    const testimony = legacyCase.evidence.find(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    );
+    if (!testimony) throw new Error("Tutorial testimony is missing");
+    testimony.description = "罗芳称看到李闻舟从顾明远书房方向匆匆离开。";
+    testimony.discovery.dialogueAliases = [];
+    delete testimony.discovery.dialogueUtterance;
+
+    const preReportSession = {
+      ...discoverAllEvidence(newSession()),
+      discoveredEvidenceIds: tutorialCase.evidence
+        .filter((evidence) => evidence.id !== testimony.id)
+        .map((evidence) => evidence.id),
+    };
+    const closed = submitCaseReport(legacyCase, preReportSession, {
+      commandId: "command_submit_stale_dialogue_case",
+      culpritId: legacyCase.solution.culpritId,
+      motiveFactId: legacyCase.solution.motiveFactId,
+      methodFactId: legacyCase.solution.methodFactId,
+      evidenceIds: preReportSession.discoveredEvidenceIds,
+      timelineEventIds: legacyCase.solution.requiredTimelineEventIds,
+      reasoning: "现有证据已经锁定李闻舟，但还有一条证人证言尚未计入卷宗。",
+    });
+    const staleSession = {
+      ...closed.session,
+      dialogue: [
+        {
+          commandId: "command_stale_witness_disclosure",
+          at: startedAt,
+          characterId: "character_luo_fang",
+          playerText: "我知道你看见了李闻舟，你不需要害怕。",
+          utterance:
+            "我……我是看到了李闻舟从顾明远书房那边出来，但不确定他是不是凶手。",
+          demeanor: "guarded" as const,
+          disclosedClaimIds: [],
+          discoveredEvidenceIds: [],
+        },
+      ],
+    };
+
+    const view = getPlayerCaseView(legacyCase, staleSession);
+    const review = getCaseReview(legacyCase, staleSession);
+    const reviewEvidence = review?.evidence.find(
+      (evidence) => evidence.id === testimony.id,
+    );
+
+    expect(view.evidence.map((evidence) => evidence.id)).toContain(testimony.id);
+    expect(reviewEvidence).toMatchObject({
+      discovered: true,
+      includedInReport: false,
+    });
+  });
+
+  it("replaces a legacy refusal in a stored transcript with an authorized cover story", () => {
+    const session = {
+      ...newSession(),
+      dialogue: [
+        {
+          commandId: "command_legacy_refusal",
+          at: startedAt,
+          characterId: "character_li_wenzhou",
+          playerText: "茶里验出了镇静剂，是你下的吗？",
+          utterance: "李闻舟沉默片刻：\"这个问题，我现在不想回答。\"",
+          demeanor: "guarded" as const,
+          disclosedClaimIds: [],
+          discoveredEvidenceIds: [],
+        },
+      ],
+    };
+
+    const playerView = getPlayerCaseView(tutorialCase, session);
+
+    expect(playerView.dialogue[0]?.utterance).toBe(
+      "我没有碰过顾先生的茶，也没有进入书房。",
+    );
+  });
+
   it("only records deductions after their supporting evidence is found", () => {
     const afterWatch = performInvestigation(tutorialCase, newSession(), {
       commandId: "command_deduction_watch",

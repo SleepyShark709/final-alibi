@@ -65,7 +65,7 @@ describe("DialogueService", () => {
       commandId: "command_talk_luo",
       expectedRevision: 0,
       characterId: "character_luo_fang",
-      text: "谁把茶送进书房？",
+      text: "你和李闻舟平时来往多吗？",
       now: "2026-08-31T10:05:00+08:00",
     };
 
@@ -102,11 +102,8 @@ describe("DialogueService", () => {
       sessionId: "game_dialogue_fallback",
       source: "tutorial",
     });
-    const service = new DialogueService(
-      repository,
-      new ScriptedProvider([]),
-      new MemorySaver(),
-    );
+    const provider = new ScriptedProvider([]);
+    const service = new DialogueService(repository, provider, new MemorySaver());
 
     const result = await service.talk({
       playerId: identity.playerId,
@@ -122,6 +119,12 @@ describe("DialogueService", () => {
       "evidence_housekeeper_testimony",
     ]);
     expect(result.outcome.response?.utterance).toContain("李闻舟");
+    expect(result.outcome.response?.stateDelta).toEqual({
+      trust: 0,
+      pressure: 0,
+      alertness: 0,
+    });
+    expect(provider.callCount).toBe(0);
   });
 
   it("does not reveal fallback testimony before its prerequisite evidence is found", () => {

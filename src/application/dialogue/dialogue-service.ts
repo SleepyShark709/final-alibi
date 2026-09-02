@@ -2,19 +2,18 @@ import { createHash } from "node:crypto";
 
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 
+import { buildGroundedDialogueFallback } from "@/ai/dialogue/dialogue-fallback";
 import { createDialogueGraph } from "@/ai/dialogue/dialogue-graph";
 import type { ModelCallAudit } from "@/ai/model-audit";
 import type { StructuredModelProvider } from "@/ai/model-provider";
 import {
-  claimCanBeDisclosed,
-  evidenceIsAvailable,
   recordDialogueTurn,
   type DialogueOutcome,
   type ValidatedCharacterResponse,
 } from "@/domain/game/game-runtime";
-import type { CaseArtifact } from "@/domain/case/case-artifact";
-import type { GameSession } from "@/domain/game/game-runtime";
 import type { GameRepository } from "@/infrastructure/persistence/game-repository";
+
+export { buildGroundedDialogueFallback as buildDeterministicDialogueFallback } from "@/ai/dialogue/dialogue-fallback";
 
 export interface TalkToCharacterInput {
   playerId: string;
@@ -92,7 +91,7 @@ export class DialogueService {
           );
           response = graphResult.finalResponse;
         } catch {
-          response = buildDeterministicDialogueFallback(
+          response = buildGroundedDialogueFallback(
             caseArtifact,
             session,
             input.characterId,
@@ -144,72 +143,4 @@ export class DialogueService {
       });
     }
   }
-}
-
-export function buildDeterministicDialogueFallback(
-  caseArtifact: CaseArtifact,
-  session: GameSession,
-  characterId: string,
-  playerText: string,
-): ValidatedCharacterResponse {
-  // 无 Key、模型异常或审计写入失败时仍可游玩；此分支也必须遵守同一证据/证词可见性规则。
-  const character = caseArtifact.characters.find(
-    (candidate) => candidate.id === characterId,
-  );
-  if (!character) throw new Error(`Unknown character "${characterId}"`);
-  const normalizedQuestion = normalizeDialogueText(playerText);
-  const requestedEvidence = caseArtifact.evidence.find(
-    (evidence) =>
-      evidence.discovery.method === "interview" &&
-      evidence.discovery.characterId === character.id &&
-      evidence.discovery.actionAliases.some((alias) => {
-        const normalizedAlias = normalizeDialogueText(alias);
-        return (
-          normalizedQuestion.includes(normalizedAlias) ||
-          normalizedAlias.includes(normalizedQuestion)
-        );
-      }),
-  );
-  const matchingEvidence =
-    requestedEvidence &&
-    evidenceIsAvailable(caseArtifact, session, requestedEvidence.id)
-      ? requestedEvidence
-      : undefined;
-  const allowedClaims = caseArtifact.claims.filter(
-    (claim) =>
-      claim.speakerId === character.id &&
-      character.knowledge.claimIds.includes(claim.id) &&
-      claimCanBeDisclosed(caseArtifact, session, character.id, claim.id),
-  );
-  const relatedClaims = matchingEvidence
-    ? allowedClaims.filter((claim) =>
-        claim.factIds.some((factId) => matchingEvidence.supportsFactIds.includes(factId)),
-      )
-    : [];
-  const undisclosedClaim = requestedEvidence
-    ? undefined
-    : allowedClaims.find(
-    (claim) => !session.discoveredClaimIds.includes(claim.id),
-      );
-  const claims = relatedClaims.length > 0 ? relatedClaims : undisclosedClaim ? [undisclosedClaim] : [];
-  const utterance =
-    matchingEvidence?.description ??
-    claims[0]?.statement ??
-    `${character.name}停顿了一下：“我能确定的，都已经告诉你了。”`;
-  const previousMemory = session.characterStates[character.id]?.memorySummary ?? "";
-
-  return {
-    utterance,
-    demeanor: claims.length > 0 ? "cooperative" : "guarded",
-    disclosedClaimIds: claims.map((claim) => claim.id),
-    memorySummary: [previousMemory, `侦探问及：${playerText.slice(0, 120)}`]
-      .filter(Boolean)
-      .join(" ")
-      .slice(-1_200),
-    stateDelta: { trust: claims.length > 0 ? 1 : 0, pressure: 0, alertness: 0 },
-  };
-}
-
-function normalizeDialogueText(value: string) {
-  return value.toLocaleLowerCase("zh-CN").replace(/[\s\p{P}\p{S}]+/gu, "");
 }

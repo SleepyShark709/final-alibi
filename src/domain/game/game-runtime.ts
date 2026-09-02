@@ -435,18 +435,27 @@ export function recordDialogueTurn(
     );
   }
 
-  const newlyDiscoveredEvidenceIds = caseArtifact.evidence
+  const questionMatchedEvidence = findMatchedInterviewEvidence(
+    caseArtifact,
+    session,
+    character.id,
+    command.playerText,
+  );
+  const responseMatchedEvidence = findResponseDisclosedInterviewEvidence(
+    caseArtifact,
+    session,
+    character.id,
+    command.response.utterance,
+  );
+  // 玩家问题可以触发预先声明的访谈证据；但如果模型已经给出了足够具体、可与
+  // 账本逐字核验的证言，回答本身才是更可靠的事实来源。两条路径最多选一条，
+  // 让本轮台词与实际新增线索始终一一对应。
+  const newlyDiscoveredEvidenceIds = [
+    responseMatchedEvidence[0] ?? questionMatchedEvidence[0],
+  ]
     .filter(
-      (evidence) =>
-        evidence.discovery.method === "interview" &&
-        evidence.discovery.characterId === character.id &&
-        !session.discoveredEvidenceIds.includes(evidence.id) &&
-        evidenceIsAvailable(caseArtifact, session, evidence.id) &&
-        investigationIntentMatches(caseArtifact, evidence, {
-          commandId: command.commandId,
-          characterId: character.id,
-          text: command.playerText,
-        }, { allowInterview: true }),
+      (evidence): evidence is CaseArtifact["evidence"][number] =>
+        Boolean(evidence) && !session.discoveredEvidenceIds.includes(evidence.id),
     )
     .map((evidence) => evidence.id);
   const discoveredEvidenceIds = unique([
@@ -523,6 +532,586 @@ export function recordDialogueTurn(
       unlockedCharacterIds: unlocks.newCharacterIds,
     },
   };
+}
+
+/**
+ * 将自由文本审讯映射到当前角色可给出的访谈证据。新案件优先使用明确的
+ * dialogueAliases；旧案件缺少该字段时，仅对“看见谁/目击谁”这类高置信问法
+ * 做窄兼容，避免一句泛泛追问意外解锁整条证据链。
+ */
+export function findMatchedInterviewEvidence(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  playerText: string,
+): CaseArtifact["evidence"] {
+  const normalizedQuestion = normalizeInterviewIntent(playerText);
+  if (normalizedQuestion.length < 2) return [];
+
+  const availableEvidence = caseArtifact.evidence.filter(
+    (evidence) =>
+      evidence.discovery.method === "interview" &&
+      evidence.discovery.characterId === characterId &&
+      evidenceIsAvailable(caseArtifact, session, evidence.id),
+  );
+  const directMatches = availableEvidence.filter((evidence) =>
+    interviewIntentMatches(caseArtifact, evidence, normalizedQuestion),
+  );
+  // 一句 NPC 台词只能对应一条新证言；即使旧案的宽泛 actionAliases 意外重叠，也
+  // 不能在屏幕上只说一件事、状态里却同时解锁多条证据。
+  const nextDirectMatch =
+    directMatches.find(
+      (evidence) => !session.discoveredEvidenceIds.includes(evidence.id),
+    ) ?? directMatches[0];
+  if (nextDirectMatch) return [nextDirectMatch];
+
+  const legacyEvidence = availableEvidence.filter(
+    (evidence) =>
+      (evidence.discovery.dialogueAliases?.length ?? 0) === 0 &&
+      !session.discoveredEvidenceIds.includes(evidence.id),
+  );
+  // 旧存档里的证人已明确表示害怕时，玩家的安抚是合理的推进动作。只有角色
+  // 恰好还有一条未标注口语触发器的访谈证据时才放行，避免泛泛安慰误解锁多条线索。
+  return legacyEvidence.length === 1 &&
+    isReassuringWitnessFollowUp(normalizedQuestion) &&
+    hasStalledWitnessDisclosure(session, characterId)
+    ? legacyEvidence
+    : [];
+}
+
+/**
+ * 回答已经明确说出账本中某条证言时，不能再因为玩家措辞没有命中 alias 而把
+ * 线索丢掉。这里不使用模型二次判断，只比较角色、可达性与足够长的事实文本锚点。
+ */
+function findResponseDisclosedInterviewEvidence(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  utterance: string,
+): CaseArtifact["evidence"] {
+  const normalizedUtterance = normalizeDialogueText(utterance);
+  if (normalizedUtterance.length < 8) return [];
+
+  const candidates = caseArtifact.evidence
+    .filter(
+      (evidence) =>
+        evidence.discovery.method === "interview" &&
+        evidence.discovery.characterId === characterId &&
+        !session.discoveredEvidenceIds.includes(evidence.id) &&
+        evidenceIsAvailable(caseArtifact, session, evidence.id),
+    )
+    .map((evidence) => ({
+      evidence,
+      score: interviewEvidenceDisclosureScore(
+        caseArtifact,
+        evidence,
+        characterId,
+        normalizedUtterance,
+      ),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  return candidates[0] ? [candidates[0].evidence] : [];
+}
+
+/**
+ * 早期版本把“回答已明确披露的证词”漏写成了未取得。读取历史 session 时根据
+ * 已保存的对话逐条补回这类证据；不改评分或报告提交内容，且下一次正常命令会把
+ * 校正后的状态随新 revision 持久化。
+ */
+export function reconcileDisclosedInterviewEvidence(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+): GameSession {
+  assertCaseMatches(caseArtifact, session);
+  const discoveredEvidenceIds = [...session.discoveredEvidenceIds];
+
+  for (const exchange of session.dialogue) {
+    const evidence = findResponseDisclosedInterviewEvidence(
+      caseArtifact,
+      { ...session, discoveredEvidenceIds },
+      exchange.characterId,
+      exchange.utterance,
+    )[0];
+    if (evidence && !discoveredEvidenceIds.includes(evidence.id)) {
+      discoveredEvidenceIds.push(evidence.id);
+    }
+  }
+
+  const unlocks = resolveUnlocks(caseArtifact, session, discoveredEvidenceIds);
+  const evidenceChanged =
+    discoveredEvidenceIds.length !== session.discoveredEvidenceIds.length;
+  const unlocksChanged =
+    unlocks.sceneIds.length !== session.unlockedSceneIds.length ||
+    unlocks.characterIds.length !== session.unlockedCharacterIds.length;
+  return evidenceChanged || unlocksChanged
+    ? {
+        ...session,
+        discoveredEvidenceIds,
+        unlockedSceneIds: unlocks.sceneIds,
+        unlockedCharacterIds: unlocks.characterIds,
+      }
+    : session;
+}
+
+function interviewEvidenceDisclosureScore(
+  caseArtifact: CaseArtifact,
+  evidence: CaseArtifact["evidence"][number],
+  characterId: string,
+  normalizedUtterance: string,
+) {
+  const sourceStatements = [
+    evidence.discovery.dialogueUtterance,
+    evidence.description,
+    ...evidence.supportsFactIds.flatMap((factId) => {
+      const fact = caseArtifact.facts.find((candidate) => candidate.id === factId);
+      return fact ? [fact.statement] : [];
+    }),
+  ].filter((statement): statement is string => Boolean(statement));
+  return sourceStatements.reduce((bestScore, statement) => {
+    const normalizedStatement = normalizeDialogueText(statement);
+    if (normalizedStatement.length < 8) return bestScore;
+    const sharedCharacterName = caseArtifact.characters.some(
+      (character) =>
+        character.id !== characterId &&
+        statement.includes(character.name) &&
+        normalizedUtterance.includes(normalizeDialogueText(character.name)),
+    );
+    const sharedBigrams = sharedDialogueBigramCount(
+      normalizedUtterance,
+      normalizedStatement,
+    );
+    // 六个连续字足以区分“我看到了一些事”这样的模糊拖延与具体证词；若存在
+    // 共同出现的案件人物，则四个双字词重叠也可识别自然的同义改写。
+    const score = hasSharedDialogueSpan(
+      normalizedUtterance,
+      normalizedStatement,
+      6,
+    )
+      ? 100 + sharedBigrams
+      : sharedCharacterName && sharedBigrams >= 4
+        ? 10 + sharedBigrams
+        : 0;
+    return Math.max(bestScore, score);
+  }, 0);
+}
+
+function sharedDialogueBigramCount(first: string, second: string) {
+  const firstBigrams = dialogueBigrams(first);
+  const secondBigrams = dialogueBigrams(second);
+  let count = 0;
+  for (const bigram of firstBigrams) {
+    if (secondBigrams.has(bigram)) count += 1;
+  }
+  return count;
+}
+
+function hasSharedDialogueSpan(first: string, second: string, minLength: number) {
+  const [shorter, longer] =
+    first.length <= second.length ? [first, second] : [second, first];
+  for (let index = 0; index <= shorter.length - minLength; index += 1) {
+    if (longer.includes(shorter.slice(index, index + minLength))) return true;
+  }
+  return false;
+}
+
+function isReassuringWitnessFollowUp(normalizedQuestion: string) {
+  return /说出来|别怕|不用怕|没关系|放心|安全|保护|保证/u.test(
+    normalizedQuestion,
+  );
+}
+
+function hasStalledWitnessDisclosure(session: GameSession, characterId: string) {
+  return session.dialogue
+    .filter(
+      (exchange) =>
+        exchange.characterId === characterId &&
+        exchange.disclosedClaimIds.length === 0 &&
+        exchange.discoveredEvidenceIds.length === 0,
+    )
+    .slice(-3)
+    .some((exchange) =>
+      /害怕|不敢|不想回答|说出来.*麻烦|不能说|不方便/u.test(
+        exchange.utterance,
+      ),
+    );
+}
+
+function interviewIntentMatches(
+  caseArtifact: CaseArtifact,
+  evidence: CaseArtifact["evidence"][number],
+  normalizedQuestion: string,
+) {
+  const aliases = [
+    ...(evidence.discovery.dialogueAliases ?? []),
+    ...evidence.discovery.actionAliases,
+  ];
+  if (
+    aliases.some((alias) => {
+      const normalizedAlias = normalizeInterviewIntent(alias);
+      return (
+        normalizedAlias.length >= 2 &&
+        (normalizedQuestion.includes(normalizedAlias) ||
+          normalizedAlias.includes(normalizedQuestion) ||
+          actionKeywordsOverlap(normalizedQuestion, normalizedAlias))
+      );
+    })
+  ) {
+    return true;
+  }
+
+  return legacyWitnessQuestionMatches(
+    caseArtifact,
+    evidence,
+    normalizedQuestion,
+  );
+}
+
+function legacyWitnessQuestionMatches(
+  caseArtifact: CaseArtifact,
+  evidence: CaseArtifact["evidence"][number],
+  normalizedQuestion: string,
+) {
+  // 只为上线前已保存的案件提供兼容：玩家明确问“看到了谁/什么”，而证词或
+  // 支撑事实也明确是目击内容时才命中。新生成案件必须依赖 dialogueAliases。
+  if (
+    (evidence.discovery.dialogueAliases?.length ?? 0) > 0 ||
+    !/看到/u.test(normalizedQuestion) ||
+    !/谁|人|其他|什么/u.test(normalizedQuestion)
+  ) {
+    return false;
+  }
+  const factStatements = evidence.supportsFactIds.flatMap((factId) => {
+    const fact = caseArtifact.facts.find((candidate) => candidate.id === factId);
+    return fact ? [fact.statement] : [];
+  });
+  return /看到/u.test(
+    normalizeInterviewIntent([evidence.description, ...factStatements].join(" ")),
+  );
+}
+
+function normalizeInterviewIntent(value: string) {
+  return normalizeDialogueText(value)
+    .replaceAll("看见", "看到")
+    .replaceAll("见到", "看到")
+    .replaceAll("目击", "看到")
+    .replace(/[吗么呢吧]/gu, "");
+}
+
+function buildInterviewEvidenceResponse(input: {
+  character: CaseArtifact["characters"][number];
+  evidence: CaseArtifact["evidence"][number];
+  previousMemory: string;
+  playerText: string;
+}): ValidatedCharacterResponse {
+  return {
+    utterance: interviewEvidenceUtterance(input.character, input.evidence),
+    demeanor: "cooperative",
+    // 访谈证据由 recordDialogueTurn 的同一匹配器解锁，而不是让模型把 fact id
+    // 伪装成 claim id。这样能同时避免 schema 失败和“说了却没拿到证据”。
+    disclosedClaimIds: [],
+    memorySummary: [
+      input.previousMemory,
+      `侦探问及：${input.playerText.slice(0, 120)}`,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .slice(-1_200),
+    stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+  };
+}
+
+function interviewEvidenceUtterance(
+  character: CaseArtifact["characters"][number],
+  evidence: CaseArtifact["evidence"][number],
+) {
+  if (evidence.discovery.dialogueUtterance) {
+    return evidence.discovery.dialogueUtterance;
+  }
+
+  // 旧 artifact 只有第三人称 evidence.description；尽量转换为角色可说的一人称，
+  // 同时不改写其事实内容。新 artifact 经过发布门禁后不会走到这里。
+  if (evidence.description.startsWith(character.name)) {
+    const statement = evidence.description
+      .slice(character.name.length)
+      .replace(/^在追问下/u, "")
+      .replace(/^(?:称|说|表示)/u, "");
+    return `我${statement}`;
+  }
+  return evidence.description;
+}
+
+/**
+ * 模型或语义守卫不可用时的玩家可见回复。
+ * 只从当前可披露证词、可取得访谈证据和角色已授权的遮掩说法中取材，且不因为
+ * 系统降级改变角色数值，以免把内部失败变成玩家可利用的嫌疑信号。
+ */
+export function buildGroundedDialogueFallback(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  playerText: string,
+): ValidatedCharacterResponse {
+  const character = caseArtifact.characters.find(
+    (candidate) => candidate.id === characterId,
+  );
+  if (!character) throw new Error(`Unknown character "${characterId}"`);
+
+  const matchingEvidence = findMatchedInterviewEvidence(
+    caseArtifact,
+    session,
+    character.id,
+    playerText,
+  )[0];
+  const previousMemory = session.characterStates[character.id]?.memorySummary ?? "";
+  if (matchingEvidence) {
+    return buildInterviewEvidenceResponse({
+      character,
+      evidence: matchingEvidence,
+      previousMemory,
+      playerText,
+    });
+  }
+  const allowedClaims = caseArtifact.claims.filter(
+    (claim) =>
+      claim.speakerId === character.id &&
+      character.knowledge.claimIds.includes(claim.id) &&
+      claimCanBeDisclosed(caseArtifact, session, character.id, claim.id),
+  );
+  const reply = selectGroundedDialogueReply({
+    caseArtifact,
+    character,
+    playerText,
+    matchingEvidence,
+    allowedClaims,
+    knownClaimIds: new Set(session.discoveredClaimIds),
+  });
+  return {
+    ...reply,
+    memorySummary: [previousMemory, `侦探问及：${playerText.slice(0, 120)}`]
+      .filter(Boolean)
+      .join(" ")
+      .slice(-1_200),
+    stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+  };
+}
+
+/**
+ * 只有账本能直接、安全地回答的高频追问才会跳过模型：明确指向角色遮掩事实的
+ * 指控、明确命中的访谈证据，以及角色已给出证词后的核验追问。其余自由问答仍交给
+ * 模型，保留可玩性。
+ */
+export function buildDeterministicDialogueShortcut(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  playerText: string,
+): ValidatedCharacterResponse | null {
+  const character = caseArtifact.characters.find(
+    (candidate) => candidate.id === characterId,
+  );
+  if (!character) throw new Error(`Unknown character "${characterId}"`);
+
+  const matchingLieRule = findQuestionMatchedLieRule(
+    caseArtifact,
+    character,
+    playerText,
+  );
+  if (matchingLieRule) {
+    const previousMemory = session.characterStates[character.id]?.memorySummary ?? "";
+    return {
+      utterance: matchingLieRule.coverStatement,
+      demeanor: "guarded",
+      disclosedClaimIds: [],
+      memorySummary: [previousMemory, `侦探问及：${playerText.slice(0, 120)}`]
+        .filter(Boolean)
+        .join(" ")
+        .slice(-1_200),
+      stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+    };
+  }
+
+  const matchingEvidence = findMatchedInterviewEvidence(
+    caseArtifact,
+    session,
+    character.id,
+    playerText,
+  )[0];
+  if (matchingEvidence) {
+    return buildInterviewEvidenceResponse({
+      character,
+      evidence: matchingEvidence,
+      previousMemory: session.characterStates[character.id]?.memorySummary ?? "",
+      playerText,
+    });
+  }
+
+  const normalizedQuestion = normalizeDialogueText(playerText);
+  const previouslyDisclosedClaimIds = new Set(
+    session.dialogue
+      .filter((exchange) => exchange.characterId === character.id)
+      .flatMap((exchange) => exchange.disclosedClaimIds),
+  );
+  if (
+    previouslyDisclosedClaimIds.size === 0 ||
+    !isVerificationFollowUp(normalizedQuestion)
+  ) {
+    return null;
+  }
+
+  const response = buildGroundedDialogueFallback(
+    caseArtifact,
+    session,
+    characterId,
+    playerText,
+  );
+  return response.disclosedClaimIds.some((claimId) =>
+    previouslyDisclosedClaimIds.has(claimId),
+  )
+    ? response
+    : null;
+}
+
+function selectGroundedDialogueReply(input: {
+  caseArtifact: CaseArtifact;
+  character: CaseArtifact["characters"][number];
+  playerText: string;
+  matchingEvidence?: CaseArtifact["evidence"][number];
+  allowedClaims: CaseArtifact["claims"];
+  knownClaimIds: ReadonlySet<string>;
+}) {
+  const relatedClaims = input.matchingEvidence
+    ? input.allowedClaims.filter((claim) =>
+        claim.factIds.some((factId) =>
+          input.matchingEvidence?.supportsFactIds.includes(factId),
+        ),
+      )
+    : [];
+  const selectedClaim =
+    relatedClaims[0] ??
+    input.allowedClaims.find((claim) => !input.knownClaimIds.has(claim.id)) ??
+    input.allowedClaims[0];
+  // 直接指控角色隐瞒的事实时，优先让其按案件账本中的 cover statement 应对；
+  // 不把模型失败表现成一句机械的拒答，也不随机选择不相干的谎言。
+  const matchingLieRule = input.matchingEvidence
+    ? undefined
+    : findQuestionMatchedLieRule(
+        input.caseArtifact,
+        input.character,
+        input.playerText,
+      );
+  const utterance =
+    input.matchingEvidence?.description ??
+    matchingLieRule?.coverStatement ??
+    selectedClaim?.statement ??
+    `${input.character.name}语气克制：“我只能说明自己知道的部分，其余请你按证据核实。”`;
+  const demeanor: CharacterDemeanor = input.matchingEvidence
+    ? "cooperative"
+    : matchingLieRule || selectedClaim?.kind === "lie"
+      ? "guarded"
+      : selectedClaim
+        ? "cooperative"
+        : "evasive";
+
+  return {
+    utterance,
+    demeanor,
+    disclosedClaimIds: matchingLieRule
+      ? []
+      : selectedClaim
+        ? [selectedClaim.id]
+        : [],
+  };
+}
+
+function findQuestionMatchedLieRule(
+  caseArtifact: CaseArtifact,
+  character: CaseArtifact["characters"][number],
+  playerText: string,
+) {
+  const normalizedQuestion = normalizeDialogueText(playerText);
+  if (normalizedQuestion.length < 2) return undefined;
+  const directChallenge = isDirectChallenge(normalizedQuestion);
+
+  return character.lieRules
+    .map((rule) => {
+      const fact = caseArtifact.facts.find((candidate) => candidate.id === rule.factId);
+      return {
+        rule,
+        score: Math.max(
+          dialogueTopicOverlapScore(normalizedQuestion, fact?.statement ?? ""),
+          dialogueTopicOverlapScore(normalizedQuestion, rule.coverStatement),
+        ),
+      };
+    })
+    .filter(({ score }) => score >= 2 || (directChallenge && score >= 1))
+    .sort((left, right) => right.score - left.score)[0]?.rule;
+}
+
+function isDirectChallenge(normalizedQuestion: string) {
+  return /为什么|怎么|凭什么|证据|证明|撒谎|虚报|欠|钱|账|费用|下药|杀|进入|离开|看到|承认|没有|没|不是/u.test(
+    normalizedQuestion,
+  );
+}
+
+function isVerificationFollowUp(normalizedQuestion: string) {
+  return /证明|证据|核实|查|记录|监控|门禁|谁看见|谁知道/u.test(
+    normalizedQuestion,
+  );
+}
+
+function dialogueTopicOverlapScore(question: string, source: string) {
+  const questionBigrams = dialogueBigrams(question);
+  const sourceBigrams = dialogueBigrams(normalizeDialogueText(source));
+  let score = 0;
+  for (const bigram of questionBigrams) {
+    if (sourceBigrams.has(bigram)) score += 1;
+  }
+  return score;
+}
+
+function dialogueBigrams(value: string) {
+  const bigrams = new Set<string>();
+  for (let index = 0; index < value.length - 1; index += 1) {
+    bigrams.add(value.slice(index, index + 2));
+  }
+  return bigrams;
+}
+
+function normalizeDialogueText(value: string) {
+  return value.toLocaleLowerCase("zh-CN").replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+const legacyDialogueRefusalPattern =
+  /(?:沉默片刻\s*[：:]\s*)?[“"]?这个问题[，,]?\s*(?:我)?(?:现在)?不想回答[。！!]?["”]?/u;
+
+function isLegacyDialogueRefusal(utterance: string) {
+  return legacyDialogueRefusalPattern.test(utterance);
+}
+
+function legacyDialogueReplacement(
+  caseArtifact: CaseArtifact,
+  exchange: DialogueExchange,
+  previouslyVisibleClaimIds: ReadonlySet<string>,
+) {
+  const character = caseArtifact.characters.find(
+    (candidate) => candidate.id === exchange.characterId,
+  );
+  if (!character) return exchange.utterance;
+
+  const previouslyVisibleClaims = caseArtifact.claims.filter(
+    (claim) =>
+      claim.speakerId === character.id &&
+      previouslyVisibleClaimIds.has(claim.id),
+  );
+  return selectGroundedDialogueReply({
+    caseArtifact,
+    character,
+    playerText: exchange.playerText,
+    allowedClaims: previouslyVisibleClaims,
+    knownClaimIds: previouslyVisibleClaimIds,
+  }).utterance;
 }
 
 export function performInvestigation(
@@ -1009,10 +1598,10 @@ function isCompleteConfrontationSubmission(
 
 export function getPlayerCaseView(
   caseArtifact: CaseArtifact,
-  session: GameSession,
+  gameSession: GameSession,
 ) {
   // 这是唯一面向普通玩家的投影：绝不能把真凶、私密档案、未发现证据或完整时间线直接透出。
-  assertCaseMatches(caseArtifact, session);
+  const session = reconcileDisclosedInterviewEvidence(caseArtifact, gameSession);
   const victim = caseArtifact.characters.find(
     (character) => character.id === caseArtifact.victimId,
   );
@@ -1029,6 +1618,29 @@ export function getPlayerCaseView(
     caseArtifact,
     session,
   );
+  const previouslyVisibleClaimIds = new Set<string>();
+  const dialogue = session.dialogue.map((exchange) => {
+    const utterance = isLegacyDialogueRefusal(exchange.utterance)
+      ? legacyDialogueReplacement(
+          caseArtifact,
+          exchange,
+          previouslyVisibleClaimIds,
+        )
+      : exchange.utterance;
+    for (const claimId of exchange.disclosedClaimIds) {
+      previouslyVisibleClaimIds.add(claimId);
+    }
+    return {
+      commandId: exchange.commandId,
+      at: exchange.at,
+      characterId: exchange.characterId,
+      playerText: exchange.playerText,
+      utterance,
+      demeanor: exchange.demeanor,
+      disclosedClaimIds: exchange.disclosedClaimIds,
+      discoveredEvidenceIds: exchange.discoveredEvidenceIds,
+    };
+  });
 
   return {
     session: {
@@ -1079,16 +1691,7 @@ export function getPlayerCaseView(
     claims: caseArtifact.claims.filter((claim) =>
       session.discoveredClaimIds.includes(claim.id),
     ),
-    dialogue: session.dialogue.map((exchange) => ({
-      commandId: exchange.commandId,
-      at: exchange.at,
-      characterId: exchange.characterId,
-      playerText: exchange.playerText,
-      utterance: exchange.utterance,
-      demeanor: exchange.demeanor,
-      disclosedClaimIds: exchange.disclosedClaimIds,
-      discoveredEvidenceIds: exchange.discoveredEvidenceIds,
-    })),
+    dialogue,
     deductions: caseArtifact.facts
       .filter((fact) => discoveredFactIds.has(fact.id))
       .map((fact) => ({
@@ -1126,9 +1729,9 @@ export function getPlayerCaseView(
 
 export function getCaseReview(
   caseArtifact: CaseArtifact,
-  session: GameSession,
+  gameSession: GameSession,
 ): CaseReview | null {
-  assertCaseMatches(caseArtifact, session);
+  const session = reconcileDisclosedInterviewEvidence(caseArtifact, gameSession);
   if (session.status !== "closed" || !session.report) {
     return null;
   }

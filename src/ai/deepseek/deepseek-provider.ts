@@ -8,13 +8,17 @@ import {
 import { ChatDeepSeek } from "@langchain/deepseek";
 import { z } from "zod";
 
+import {
+  StructuredOutputValidationError,
+  type ModelMessage,
+  type ModelTier,
+  type ModelUsage,
+  type StructuredModelProvider,
+  type StructuredModelRequest,
+  type StructuredModelResult,
+} from "@/ai/model-provider";
 import type {
-  ModelMessage,
-  ModelTier,
-  ModelUsage,
-  StructuredModelProvider,
-  StructuredModelRequest,
-  StructuredModelResult,
+  StructuredOutputValidationIssue,
 } from "@/ai/model-provider";
 
 export interface DeepSeekProviderOptions {
@@ -119,13 +123,19 @@ export class DeepSeekModelProvider implements StructuredModelProvider {
       if (parsed === null) {
         throw noParseableJsonError(request.schemaName, raw);
       }
-      const value = parseSchemaOrThrow(request.schema, parsed, request.schemaName);
+      const usage = extractUsage(raw);
+      const rawResponse = serializeMessage(raw);
+      const value = parseSchemaOrThrow(request.schema, parsed, request.schemaName, {
+        model: modelName,
+        usage,
+        rawResponse,
+      });
 
       return {
         value,
         model: modelName,
-        usage: extractUsage(raw),
-        rawResponse: serializeMessage(raw),
+        usage,
+        rawResponse,
       };
     }
 
@@ -145,13 +155,19 @@ export class DeepSeekModelProvider implements StructuredModelProvider {
         `DeepSeek returned no parseable JSON for structured output "${request.schemaName}"`,
       );
     }
-    const value = request.schema.parse(result.parsed);
+    const usage = extractUsage(result.raw);
+    const rawResponse = serializeMessage(result.raw);
+    const value = parseSchemaOrThrow(request.schema, result.parsed, request.schemaName, {
+      model: modelName,
+      usage,
+      rawResponse,
+    });
 
     return {
       value,
       model: modelName,
-      usage: extractUsage(result.raw),
-      rawResponse: serializeMessage(result.raw),
+      usage,
+      rawResponse,
     };
   }
 
@@ -241,20 +257,65 @@ function parseSchemaOrThrow<T extends Record<string, unknown>>(
   schema: z.ZodType<T>,
   input: unknown,
   schemaName: string,
+  diagnostics: {
+    model: string;
+    usage: ModelUsage;
+    rawResponse: Record<string, unknown>;
+  },
 ): T {
   const parsed = schema.safeParse(input);
   if (parsed.success) return parsed.data;
 
-  const issues = parsed.error.issues
-    .slice(0, 3)
-    .map((issue) => (issue.path.join(".") || "root") + ": " + issue.message)
-    .join("; ");
-  throw new Error(
-    "DeepSeek JSON for structured output \"" +
-      schemaName +
-      "\" failed schema validation: " +
-      issues,
+  const issues: StructuredOutputValidationIssue[] = parsed.error.issues.map(
+    (issue) => ({
+      path: issue.path.map((segment) =>
+        typeof segment === "number" ? segment : String(segment),
+      ),
+      message: issue.message,
+      received: formatDiagnosticValue(readPath(input, issue.path)),
+    }),
   );
+  throw new StructuredOutputValidationError(
+    schemaName,
+    input,
+    issues,
+    diagnostics.model,
+    diagnostics.usage,
+    diagnostics.rawResponse,
+  );
+}
+
+function readPath(input: unknown, path: ReadonlyArray<PropertyKey>) {
+  let current = input;
+  for (const segment of path) {
+    if (Array.isArray(current) && typeof segment === "number") {
+      current = current[segment];
+      continue;
+    }
+    if (
+      current &&
+      typeof current === "object" &&
+      typeof segment === "string"
+    ) {
+      current = (current as Record<string, unknown>)[segment];
+      continue;
+    }
+    return undefined;
+  }
+  return current;
+}
+
+function formatDiagnosticValue(value: unknown) {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
+  if (serialized === undefined) return "undefined";
+  return serialized.length <= 240
+    ? serialized
+    : `${serialized.slice(0, 237)}...`;
 }
 
 function noParseableJsonError(schemaName: string, message: BaseMessage): Error {

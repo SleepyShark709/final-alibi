@@ -26,6 +26,19 @@ export interface GenerateCaseResult {
   estimatedCostMicrosCny: number;
 }
 
+interface GenerationErrorDetails {
+  name: string;
+  message: string;
+  code?: string;
+  status?: number;
+  stack?: string;
+  validationIssues?: Array<{
+    code: string;
+    path: string;
+    message: string;
+  }>;
+}
+
 export class CaseGenerationRejectedError extends Error {
   constructor(
     message: string,
@@ -91,6 +104,7 @@ export class CaseGenerationService {
         attempt: 0,
         draft: null,
         validationIssues: [],
+        formatRepairTargets: [],
         blindSolve: null,
         finalArtifact: null,
         rejectionReason: null,
@@ -209,10 +223,24 @@ export async function processNextCaseGenerationJob(
     return { jobId: job.id, status: "succeeded" };
   } catch (error) {
     const retryable = isTransientModelError(error);
-    await repository.failJob(job.id, errorMessage(error), { retryable, now });
+    const failure = describeGenerationError(error);
+    const status = retryable && job.attempts < job.maxAttempts ? "retrying" : "failed";
+
+    console.error("[generation-worker] job failed", {
+      jobId: job.id,
+      playerId: job.playerId,
+      type: job.type,
+      attempt: job.attempts,
+      maxAttempts: job.maxAttempts,
+      retryable,
+      status,
+      error: failure,
+    });
+
+    await repository.failJob(job.id, formatGenerationError(failure), { retryable, now });
     return {
       jobId: job.id,
-      status: retryable && job.attempts < job.maxAttempts ? "retrying" : "failed",
+      status,
     };
   } finally {
     clearInterval(heartbeat);
@@ -232,6 +260,61 @@ function isTransientModelError(error: unknown) {
   );
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+function describeGenerationError(error: unknown): GenerationErrorDetails {
+  const record = isRecord(error) ? error : undefined;
+  const name =
+    error instanceof Error
+      ? error.name || "Error"
+      : readNonEmptyString(record?.name) ?? "UnknownError";
+  const message = errorMessage(error, record);
+  const code = readErrorCode(record?.code);
+  const status =
+    typeof record?.status === "number" && Number.isFinite(record.status)
+      ? record.status
+      : undefined;
+
+  return {
+    name,
+    message,
+    ...(code ? { code } : {}),
+    ...(status === undefined ? {} : { status }),
+    ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+    ...(error instanceof CaseGenerationRejectedError
+      ? { validationIssues: error.validationIssues }
+      : {}),
+  };
+}
+
+function formatGenerationError(error: GenerationErrorDetails) {
+  const context = [
+    error.status === undefined ? undefined : `status=${error.status}`,
+    error.code ? `code=${error.code}` : undefined,
+  ].filter((value): value is string => Boolean(value));
+  const prefix = context.length > 0 ? `${error.name} [${context.join(", ")}]` : error.name;
+  return `${prefix}: ${error.message}`;
+}
+
+function errorMessage(error: unknown, record?: Record<string, unknown>) {
+  if (error instanceof Error && error.message) return error.message;
+  const message = readNonEmptyString(record?.message);
+  if (message) return message;
+  if (typeof error === "string") return error;
+
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readErrorCode(value: unknown) {
+  return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
 }

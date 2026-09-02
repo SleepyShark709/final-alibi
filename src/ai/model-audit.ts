@@ -7,6 +7,7 @@ import {
 import type {
   ModelMessage,
   ModelTier,
+  StructuredOutputValidationError,
   StructuredModelResult,
 } from "@/ai/model-provider";
 
@@ -33,19 +34,64 @@ export function createModelCallAudit<T extends Record<string, unknown>>(
   result: StructuredModelResult<T>,
   occurredAt = new Date(),
 ): ModelCallAudit {
+  return createModelCallAuditFromResponse(
+    task,
+    tier,
+    messages,
+    result.model,
+    result.usage,
+    result.rawResponse,
+    occurredAt,
+  );
+}
+
+/** 账单与原始响应均已产生时，即使 schema 不合规也要留下可关联的审计记录。 */
+export function createModelCallAuditFromStructuredOutputValidationError(
+  task: string,
+  tier: ModelTier,
+  messages: ModelMessage[],
+  error: StructuredOutputValidationError,
+  occurredAt = new Date(),
+): ModelCallAudit {
+  return createModelCallAuditFromResponse(
+    task,
+    tier,
+    messages,
+    error.model,
+    error.usage,
+    {
+      ...error.rawResponse,
+      structuredOutputValidation: {
+        schemaName: error.schemaName,
+        issues: error.issues,
+      },
+    },
+    occurredAt,
+  );
+}
+
+function createModelCallAuditFromResponse(
+  task: string,
+  tier: ModelTier,
+  messages: ModelMessage[],
+  model: string,
+  usage: StructuredModelResult<Record<string, unknown>>["usage"],
+  response: Record<string, unknown>,
+  occurredAt: Date,
+): ModelCallAudit {
   return {
     task,
     tier,
-    model: result.model,
-    inputTokens: result.usage.inputTokens,
-    cachedInputTokens: result.usage.cachedInputTokens,
-    outputTokens: result.usage.outputTokens,
+    model,
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    outputTokens: usage.outputTokens,
     estimatedCostMicrosCny: estimateDeepSeekCostMicrosCny(
       tier,
-      result.usage,
+      usage,
       pricingWindowAt(occurredAt),
     ),
     request: { messages },
-    response: result.rawResponse,
+    response,
   };
 }

@@ -30,6 +30,11 @@ vi.mock("@langchain/deepseek", () => ({
 import { DeepSeekModelProvider } from "./deepseek-provider";
 
 const resultSchema = z.object({ verdict: z.string() }).strict();
+const lieStrategySchema = z
+  .object({
+    strategy: z.enum(["deny", "deflect", "minimize", "fabricate_cover"]),
+  })
+  .strict();
 
 describe("DeepSeekModelProvider structured output", () => {
   it("uses the raw JSON API for DeepSeek V4 and supplies the actual schema to the model", async () => {
@@ -101,5 +106,46 @@ describe("DeepSeekModelProvider structured output", () => {
     ).rejects.toThrow(
       'DeepSeek JSON for structured output "test_result" failed schema validation: verdict: Invalid input: expected string, received undefined',
     );
+  });
+
+  it("keeps the invalid enum value available for recovery and diagnosis", async () => {
+    harness.callConfigs.length = 0;
+    harness.invocations.length = 0;
+    harness.content = '{"strategy":"fabricate_alibi"}';
+    const provider = new DeepSeekModelProvider({
+      apiKey: "test-key",
+      proModel: "deepseek-v4-pro",
+    });
+
+    const error = await provider
+      .invokeStructured({
+        tier: "pro",
+        schema: lieStrategySchema,
+        schemaName: "lie_rule",
+        messages: [{ role: "user", content: "Return a lie rule." }],
+      })
+      .then(
+        () => new Error("Expected schema validation to fail"),
+        (reason) => reason,
+      );
+
+    expect(error).toMatchObject({
+      name: "StructuredOutputValidationError",
+      schemaName: "lie_rule",
+      input: { strategy: "fabricate_alibi" },
+      issues: [
+        expect.objectContaining({
+          path: ["strategy"],
+          received: '"fabricate_alibi"',
+        }),
+      ],
+      rawResponse: expect.objectContaining({
+        content: '{"strategy":"fabricate_alibi"}',
+      }),
+    });
+    expect(error).toBeInstanceOf(Error);
+    if (error instanceof Error) {
+      expect(error.message).toContain('received "fabricate_alibi"');
+    }
   });
 });

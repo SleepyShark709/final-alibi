@@ -9,10 +9,12 @@ import {
   type CaseArtifact,
 } from "@/domain/case/case-artifact";
 import {
+  buildDeterministicDialogueShortcut,
   claimCanBeDisclosed,
   type GameSession,
 } from "@/domain/game/game-runtime";
 
+import { buildGroundedDialogueFallback } from "./dialogue-fallback";
 import {
   buildCharacterMessages,
   buildDialogueGuardMessages,
@@ -33,6 +35,7 @@ const DialogueGraphState = new StateSchema({
   attempt: z.number().int().nonnegative().default(0),
   draft: characterResponseSchema.nullable().default(null),
   guard: dialogueGuardSchema.nullable().default(null),
+  shortcutResponse: characterResponseSchema.nullable().default(null),
   finalResponse: characterResponseSchema.nullable().default(null),
   modelCalls: z.array(modelCallAuditSchema).default([]),
 });
@@ -63,6 +66,20 @@ export function createDialogueGraph(
   const maxDraftAttempts = options.maxDraftAttempts ?? 3;
 
   const generate: typeof DialogueGraphState.Node = async (state) => {
+    const shortcutResponse = buildDeterministicDialogueShortcut(
+      state.caseArtifact,
+      state.session,
+      state.characterId,
+      state.playerText,
+    );
+    if (shortcutResponse) {
+      return {
+        draft: null,
+        guard: null,
+        shortcutResponse,
+      };
+    }
+
     const messages = buildCharacterMessages({
       caseArtifact: state.caseArtifact,
       session: state.session,
@@ -83,6 +100,7 @@ export function createDialogueGraph(
       attempt: state.attempt + 1,
       draft: result.value,
       guard: null,
+      shortcutResponse: null,
       modelCalls: [
         ...state.modelCalls,
         createModelCallAudit("character_response", "flash", messages, result),
@@ -118,6 +136,21 @@ export function createDialogueGraph(
       };
     }
 
+    // 已披露的 lie claim 或逐字采用 coverStatement 都是账本明确授权的说法。
+    // 这类回复先通过确定性校验即可展示，不能再交给语义守卫用“客观真相”反推否决。
+    if (
+      hasAuthorizedLieResponse(
+        state.caseArtifact,
+        state.session,
+        state.characterId,
+        state.draft,
+      )
+    ) {
+      return {
+        guard: { safe: true, violationCodes: [], feedback: "" },
+      };
+    }
+
     const messages = buildDialogueGuardMessages({
       caseArtifact: state.caseArtifact,
       session: state.session,
@@ -144,26 +177,22 @@ export function createDialogueGraph(
   };
 
   const finalize: typeof DialogueGraphState.Node = (state) => ({
-    finalResponse: state.draft,
+    finalResponse: state.shortcutResponse ?? state.draft,
   });
 
   const fallback: typeof DialogueGraphState.Node = (state) => {
-    const character = state.caseArtifact.characters.find(
-      (candidate) => candidate.id === state.characterId,
-    );
-    const previousSummary =
-      state.session.characterStates[state.characterId]?.memorySummary ?? "";
+    console.warn("[dialogue-fallback] semantic guard exhausted", {
+      characterId: state.characterId,
+      attempts: state.attempt,
+      violationCodes: state.guard?.violationCodes ?? [],
+    });
     return {
-      finalResponse: {
-        utterance: `${character?.name ?? "对方"}沉默片刻：“这个问题，我现在不想回答。”`,
-        demeanor: "guarded",
-        disclosedClaimIds: [],
-        memorySummary: [previousSummary, "侦探提出问题，我选择暂不回答。"]
-          .filter(Boolean)
-          .join(" ")
-          .slice(-1_200),
-        stateDelta: { trust: -1, pressure: 1, alertness: 1 },
-      },
+      finalResponse: buildGroundedDialogueFallback(
+        state.caseArtifact,
+        state.session,
+        state.characterId,
+        state.playerText,
+      ),
     };
   };
 
@@ -173,7 +202,14 @@ export function createDialogueGraph(
     .addNode("finalize", finalize)
     .addNode("fallback", fallback)
     .addEdge(START, "generate")
-    .addEdge("generate", "review_draft")
+    .addConditionalEdges(
+      "generate",
+      (state) => (state.shortcutResponse ? "finalize" : "review_draft"),
+      {
+        finalize: "finalize",
+        review_draft: "review_draft",
+      },
+    )
     .addConditionalEdges(
       "review_draft",
       (state) => {
@@ -246,7 +282,74 @@ function validateDraftDeterministically(
   ) {
     violations.add("knowledge_leak");
   }
+  if (
+    draft.disclosedClaimIds.length === 0 &&
+    repeatsPreviousNoProgressResponse(session, characterId, normalizedUtterance)
+  ) {
+    violations.add("repeated_response");
+  }
   return [...violations];
+}
+
+function repeatsPreviousNoProgressResponse(
+  session: GameSession,
+  characterId: string,
+  normalizedUtterance: string,
+) {
+  if (normalizedUtterance.length < 8) return false;
+
+  return session.dialogue
+    .filter(
+      (exchange) =>
+        exchange.characterId === characterId &&
+        exchange.disclosedClaimIds.length === 0 &&
+        exchange.discoveredEvidenceIds.length === 0,
+    )
+    .slice(-3)
+    .some((exchange) => {
+      const previous = normalizeSemanticText(exchange.utterance);
+      if (previous.length < 8) return false;
+      return (
+        normalizedUtterance === previous ||
+        (normalizedUtterance.length >= 12 &&
+          previous.length >= 12 &&
+          (normalizedUtterance.includes(previous) ||
+            previous.includes(normalizedUtterance)))
+      );
+    });
+}
+
+function hasAuthorizedLieResponse(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  draft: CharacterResponse,
+) {
+  const character = caseArtifact.characters.find(
+    (candidate) => candidate.id === characterId,
+  );
+  if (!character) return false;
+
+  const declaredLie = draft.disclosedClaimIds.some((claimId) => {
+    const claim = caseArtifact.claims.find((candidate) => candidate.id === claimId);
+    return Boolean(
+      claim &&
+        claim.kind === "lie" &&
+        claim.speakerId === character.id &&
+        character.knowledge.claimIds.includes(claim.id) &&
+        claimCanBeDisclosed(caseArtifact, session, character.id, claim.id),
+    );
+  });
+  if (declaredLie) return true;
+
+  const normalizedUtterance = normalizeSemanticText(draft.utterance);
+  return character.lieRules.some((rule) => {
+    const normalizedCover = normalizeSemanticText(rule.coverStatement);
+    return (
+      normalizedCover.length >= 8 &&
+      normalizedUtterance.includes(normalizedCover)
+    );
+  });
 }
 
 function normalizeSemanticText(value: string) {

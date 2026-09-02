@@ -562,6 +562,13 @@ export const tutorialCase = parseCaseArtifact({
         method: "interview",
         characterId: "character_chen_mo",
         actionAliases: ["询问陈默案发时在哪里", "追问医学直播", "核实陈默的不在场证明"],
+        dialogueAliases: [
+          "案发时你在哪里",
+          "你当晚一直在诊所吗",
+          "医学直播能证明你的不在场吗",
+        ],
+        dialogueUtterance:
+          "我当晚一直在城南诊所直播，可以提供平台后台的回放链接和观众互动记录。",
         prerequisiteEvidenceIds: [],
       },
     },
@@ -615,6 +622,13 @@ export const tutorialCase = parseCaseArtifact({
         method: "interview",
         characterId: "character_luo_fang",
         actionAliases: ["询问罗芳谁送了茶", "追问茶盘经过"],
+        dialogueAliases: [
+          "谁把茶送进书房",
+          "茶盘后来是谁拿走的",
+          "你看到谁去二楼了吗",
+        ],
+        dialogueUtterance:
+          "我看到李闻舟主动接过茶盘，说由他送上楼，之后独自去了二楼。",
         prerequisiteEvidenceIds: [],
       },
     },
