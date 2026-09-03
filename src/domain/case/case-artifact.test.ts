@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCaseArtifact } from "./case-artifact";
+import {
+  applyCaseArtifactRepairPatch,
+  parseCaseArtifact,
+} from "./case-artifact";
 
 const minimalCaseArtifact = {
   schemaVersion: 1,
@@ -162,5 +165,44 @@ describe("parseCaseArtifact", () => {
       Object.isFrozen(parsed.characters),
       Object.isFrozen(parsed.characters[0]),
     ]).toEqual([true, true, true]);
+  });
+
+  it("allows a compact repair to remove an unreferenced supporting character", () => {
+    const parsed = parseCaseArtifact({
+      ...minimalCaseArtifact,
+      characters: [
+        ...minimalCaseArtifact.characters,
+        {
+          id: "character_witness",
+          name: "许安",
+          roleTier: "witness",
+          occupation: "物业管理员",
+          publicProfile: "负责别墅的日常巡查。",
+          privateProfile: "没有掌握本案的核心信息。",
+          portraitTags: {
+            gender: "female",
+            ageGroup: "young",
+            temperament: ["谨慎"],
+          },
+          knowledge: { factIds: [], evidenceIds: [], claimIds: [] },
+          secretFactIds: [],
+          lieRules: [],
+        },
+      ],
+    });
+
+    const repaired = applyCaseArtifactRepairPatch(parsed, {
+      removeCharacterIds: ["character_witness"],
+    });
+
+    expect(repaired.characters.map((character) => character.id)).toEqual([
+      "character_victim",
+      "character_suspect",
+    ]);
+    expect(() =>
+      applyCaseArtifactRepairPatch(parsed, {
+        removeCharacterIds: ["character_suspect"],
+      }),
+    ).toThrow("can only remove existing supporting characters");
   });
 });

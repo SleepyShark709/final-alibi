@@ -86,6 +86,65 @@ export function findReachableEvidenceIds(
   return reachableEvidenceIds;
 }
 
+/**
+ * 玩家刚开局、不依赖任何已发现线索时，可从已开放场景直接取得的证据。
+ * 它与完整可达性不同：不展开解锁规则，也不接受任何前置证据。
+ */
+export function findInitiallyDiscoverableSceneEvidenceIds(
+  caseArtifact: CaseArtifact,
+): Set<string> {
+  const initiallyUnlockedSceneIds = new Set(
+    caseArtifact.scenes
+      .filter((scene) => scene.initiallyUnlocked)
+      .map((scene) => scene.id),
+  );
+  const characterUnlockTargets = new Set(
+    caseArtifact.unlockRules
+      .filter((rule) => rule.targetType === "character")
+      .map((rule) => rule.targetId),
+  );
+  const initiallyUnlockedCharacterIds = new Set(
+    caseArtifact.characters
+      .filter(
+        (character) =>
+          (character.roleTier === "suspect" || character.roleTier === "witness") &&
+          !characterUnlockTargets.has(character.id),
+      )
+      .map((character) => character.id),
+  );
+  const noEvidence = new Set<string>();
+
+  return new Set(
+    caseArtifact.evidence
+      .filter((evidence) => {
+        // interview 必须由玩家主动与角色对话取得；sceneId 只描述访谈发生地，
+        // 不能让一份证词在玩家进入场景时就像物件线索一样自动可见。
+        if (
+          !evidence.discovery.sceneId ||
+          evidence.discovery.method === "interview"
+        ) {
+          return false;
+        }
+        const evidenceUnlockRules = caseArtifact.unlockRules.filter(
+          (rule) => rule.targetType === "evidence" && rule.targetId === evidence.id,
+        );
+        const evidenceUnlockedAtStart =
+          evidenceUnlockRules.length === 0 ||
+          evidenceUnlockRules.some((rule) =>
+            unlockRuleIsSatisfied(rule, noEvidence),
+          );
+        return (
+          evidenceUnlockedAtStart &&
+          evidence.discovery.prerequisiteEvidenceIds.length === 0 &&
+          initiallyUnlockedSceneIds.has(evidence.discovery.sceneId) &&
+          (!evidence.discovery.characterId ||
+            initiallyUnlockedCharacterIds.has(evidence.discovery.characterId))
+        );
+      })
+      .map((evidence) => evidence.id),
+  );
+}
+
 function unlockRuleIsSatisfied(
   rule: CaseArtifact["unlockRules"][number],
   discoveredEvidenceIds: ReadonlySet<string>,

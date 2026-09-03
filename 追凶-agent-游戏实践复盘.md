@@ -58,6 +58,109 @@ flowchart LR
 
 现在的做法是把 LangGraph 用在两条很窄的链路上。
 
+#### 如果你从没写过 agent，先跑一个会说话的嫌疑人
+
+先别上来就做多 agent、工具调用、记忆和 RAG。第一步只要把一件事跑通：玩家说一句话，角色带着固定人设回一句话。这个版本没有“聪明地查资料”的能力，也没有存档；它只是一个模型、一份状态和一个节点。够了。
+
+项目里已经有这些依赖；从空项目开始可以先装：
+
+```bash
+pnpm add @langchain/core @langchain/deepseek @langchain/langgraph zod
+pnpm add -D tsx typescript
+```
+
+然后新建 `.env.local`。Key 只放服务端环境变量，别写成 `NEXT_PUBLIC_DEEPSEEK_API_KEY`，不然它会跟着前端包跑出去。
+
+```dotenv
+DEEPSEEK_API_KEY=你的_DeepSeek_API_Key
+DEEPSEEK_FLASH_MODEL=deepseek-v4-flash
+```
+
+下面这份 `first-suspect.ts` 就是一个最小的角色 agent。`StateGraph` 现在只有一个 `answer` 节点，但开始、执行、结束已经清楚了；后面加校验、重试或工具时，不用把整段逻辑推倒重来。
+
+```ts
+import { ChatDeepSeek } from "@langchain/deepseek";
+import { END, START, StateGraph, StateSchema } from "@langchain/langgraph";
+import { z } from "zod";
+
+if (!process.env.DEEPSEEK_API_KEY) {
+  throw new Error("请先在 .env.local 配置 DEEPSEEK_API_KEY");
+}
+
+const SuspectState = new StateSchema({
+  playerText: z.string().trim().min(1),
+  reply: z.string().default(""),
+});
+
+const model = new ChatDeepSeek({
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  model: process.env.DEEPSEEK_FLASH_MODEL ?? "deepseek-v4-flash",
+  temperature: 0.6,
+  maxRetries: 2,
+  // 本项目使用 V4 时显式关掉 Thinking，拿到更稳定的短回复。
+  modelKwargs: { thinking: { type: "disabled" } },
+});
+
+const answer: typeof SuspectState.Node = async (state) => {
+  const response = await model.invoke([
+    [
+      "system",
+      "你是探案游戏里的图书管理员。只根据已知材料作答；不知道就直说不知道。回答控制在两句话以内。",
+    ],
+    ["human", state.playerText],
+  ]);
+
+  return {
+    reply:
+      typeof response.content === "string"
+        ? response.content
+        : JSON.stringify(response.content),
+  };
+};
+
+const agent = new StateGraph(SuspectState)
+  .addNode("answer", answer)
+  .addEdge(START, "answer")
+  .addEdge("answer", END)
+  .compile();
+
+const result = await agent.invoke({ playerText: "昨晚九点你在哪里？" });
+console.log(result.reply);
+```
+
+用这条命令跑它：
+
+```bash
+pnpm tsx --env-file-if-exists=.env.local first-suspect.ts
+```
+
+这段代码里，`system` message 是人设和边界，`playerText` 是这一轮输入，`reply` 是图的输出。所谓 agent，在这个阶段其实没有那么玄：它是“带状态的模型调用”。真正容易失控的部分，是第二轮以后谁能知道什么、哪句话能改变游戏、失败时怎么处理。
+
+所以项目没有停在这一个节点上，而是把它扩成了下面这条实际在跑的对话图：
+
+```ts
+return new StateGraph(DialogueGraphState)
+  .addNode("generate", generate)
+  .addNode("review_draft", guard)
+  .addNode("finalize", finalize)
+  .addNode("fallback", fallback)
+  .addEdge(START, "generate")
+  .addEdge("generate", "review_draft")
+  .addConditionalEdges(
+    "review_draft",
+    (state) => {
+      if (state.guard?.safe) return "finalize";
+      return state.attempt < 3 ? "retry" : "fallback";
+    },
+    { finalize: "finalize", retry: "generate", fallback: "fallback" },
+  )
+  .addEdge("finalize", END)
+  .addEdge("fallback", END)
+  .compile({ checkpointer });
+```
+
+读这段时，把它当作一张流程图就行：先生成草稿，再审；安全就交给游戏运行时，不安全就重写，连着三次都不行便让角色用安全话术拒答。LangGraph 的价值不是替你想剧情，而是把“下一步该去哪”写得比一堆 `if/else` 更容易看懂和测试。
+
 | 链路 | 图里做什么 | 图外谁说了算 |
 | --- | --- | --- |
 | 案件生成 | 草稿、修复、盲解 | 案件能否发布、真凶是否唯一 |
@@ -141,7 +244,45 @@ Worker 在长模型调用期间每 10 秒写一次 heartbeat，避免正常的�
 
 日常改动先跑 `typecheck`、`lint`、`test`、`build` 和一次 worker。项目里还有一个真实模型审计脚本：它会连续生成多份案件，再走一遍发布校验。这个脚本会花 API 钱，所以不适合拿来当“我改了一行 CSS，跑一下看看”的烟测。
 
-### 3.4 怎么实现多 agent 人格与故事定位
+### 3.4 怎么把生成失败从黑盒做成自愈链路
+
+这一块后来经历了一次很典型的功能迭代。
+
+最早，生成失败后玩家只会看到一句“请重新提交，或换一个更具体的主题”。数据库其实已经保存了错误，前端却把它丢掉了；worker 也没有把一次失败里的任务、重试次数、模型响应和校验路径串起来。结果就是玩家只能反复点按钮，我只能猜是接口超时、JSON 格式错了，还是案件本身不可解。
+
+第一步不是继续调 prompt，而是先让失败可观察：失败页展示任务 ID、当前尝试次数和原始错误；worker 输出带 `jobId`、错误类型、是否可重试和校验问题的结构化日志；结构化输出即使没过 Zod，甚至压根没解析出 JSON，也会保留模型、token、原始响应和具体字段路径。局部补丁在“格式不合法”“无法解析”“能解析但合并失败”这三个阶段失败，也分别留下审计记录。
+
+这样一来，“重试了三次”不再是一句模糊状态，而是一条能从 UI 追到 job、再追到 `model_runs` 的证据链。也正是靠这条链路，我才发现早期所谓的三次修复，有时其实是一次首稿调用加三次没有被完整记录的补丁失败。
+
+第二步是把“修复”从整案重写改成局部手术。以前每次校验失败，都会把整份案件和全部规则再次发给模型，成本接近重新生成，而且模型修好一处时很容易顺手改坏另一处。后来定义了按 ID 更新的 `CaseArtifactRepairPatch`：只发结构快照、失败路径和相关字段，没出问题的内容原样保留。一次真实故障里的修复请求从 25,837 字节降到 12,583 字节，体积少了约 51%。
+
+不过，局部补丁仍然是概率性的。一次真实任务同时报出了 13 个问题：悬空证据引用、秘密不在角色知识里、嫌疑人无法唯一收敛、必要证据链不足，以及多条开场线索直接点名嫌疑人。逐次回放后，问题数在 `5 → 4 → 5 → 5` 之间来回摆动——模型修掉一个引用，又破坏了另一段证据关系。这就是最典型的“打地鼠”。
+
+继续拆根因后，真正的问题并不是 13 条规则都写得不够凶，而是系统边界不对。其中一个关键 bug 是：访谈证据带了 `sceneId`，就被误判成玩家开场能在现场捡到的证据；它随后又被排除在决定性证据链之外，间接造成“证人证词剧透开场”“候选人不唯一”和“必要链不足”三类连锁故障。
+
+最后把生成链路收敛成了下面这套分工：
+
+```text
+生成前约束
+  → 首稿与 schema 校验
+  → 确定性引用闭包 / 开场节奏归一化 / 最小证据链编译
+  → 图校验与盲解
+      ├─ 通过：冻结发布
+      ├─ 仍有语义问题：紧凑补丁，再回到校验
+      └─ 图内修复耗尽：任务级重开一份首稿，仍受最大尝试次数限制
+
+每次模型调用与失败 → model_runs 审计 → worker 日志 → 玩家可见错误
+```
+
+现在，代码会先完成那些没有歧义的工作：删除生成账本里可安全处理的列表型未知引用，闭合角色的秘密、谎言和自身作案事实知识，根据证据的 `objectId` 补回物件反向索引；访谈必须由玩家主动问出，不再算作开场拾取；开场线索会移除过早的嫌疑人关系、敏感事实和姓名；候选条件齐全时，再从非开场证据里编译出五条决定性线索，其中至少两条来自不同证人的访谈，分别闭合真凶、动机、手法和三名非真凶的排除关系。无法安全猜测的标量拓扑和叙事语义，才留给模型做局部修复。
+
+同一份真实失败首稿经过这套流程后，从 13 个校验问题降到 0，直接在一次 artifact 尝试里通过，必要链是五条证据、两名证人，没有再调用修复模型。这个结果比“重试成功了”更重要：它是确定性的、幂等的，可以拿同一份原始响应反复回归，而且不会额外花模型费用。
+
+这轮修复也把“案件正确”的标准从 JSON 合法推进到了玩家体验。辅助角色数量由 seed 稳定决定为 2–4 人；决定性链必须经过至少两名证人；开场线索不能直接给出嫌疑人、动机、手法、机会或不在场证明，现场物证也不能一口气排除所有其他嫌疑人。NPC 如果已经在回答里明确说出了某条证词，运行时会把它记入线索簿，并为旧存档做窄范围补偿；教程真相账本发生变化时则升级案件 ID，不覆盖已经存在的历史存档。
+
+这次迭代最后留下的原则很简单：prompt 用来降低错误概率，代码负责可确定的约束闭包，模型只修需要语义判断的局部，validator 和盲解负责决定能否发布，任务级重试负责兜住整份草稿已经不可救的情况，而日志要覆盖这条链上的每一次付费调用。现在使用的 12,000 / 3,200 token 上限仍然只是工程护栏，不是经过证明的最优值；下一步应该根据首稿长度、问题类型和总耗时动态分配修复预算。
+
+### 3.5 怎么实现多 agent 人格与故事定位
 
 “多 agent 人格”这件事，后来我理解得更像一个权限系统，而不是给每个人写一大段人设。
 
@@ -170,7 +311,7 @@ Worker 在长模型调用期间每 10 秒写一次 heartbeat，避免正常的�
 
 严格说，当前的泄露防护还没有到“万无一失”。确定性检查比较擅长抓原文复述和不该出现的 ID；如果模型把未知事实换了一种很绕的说法，仍然需要更强的语义审计或结构化 provenance 来补。这是目前明确留着的待办，不假装它已经被一句 prompt 解决了。
 
-### 3.5 怎么实现监控与上帝模式
+### 3.6 怎么实现监控与上帝模式
 
 做 agent 游戏有一个很现实的问题：它出问题时，肉眼只看到一句角色台词。
 

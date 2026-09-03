@@ -305,6 +305,32 @@ describe("validateCaseArtifact", () => {
     expect(codes).toContain("premature_direct_evidence_lock");
   });
 
+  it("identifies the direct scene clue that independently eliminates every other suspect", async () => {
+    const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
+    const caseArtifact = structuredClone(tutorialCase);
+    const evidenceIndex = caseArtifact.evidence.findIndex(
+      (evidence) => evidence.id === "evidence_brass_bookend",
+    );
+    const directEvidence = caseArtifact.evidence[evidenceIndex];
+    if (!directEvidence || evidenceIndex < 0) {
+      throw new Error("Tutorial direct forensic evidence is missing");
+    }
+    directEvidence.excludesCharacterIds = caseArtifact.characters
+      .filter(
+        (character) =>
+          character.roleTier === "suspect" &&
+          character.id !== caseArtifact.culpritId,
+      )
+      .map((character) => character.id);
+
+    expect(validatePublishableCaseArtifact(caseArtifact).issues).toContainEqual({
+      code: "premature_direct_evidence_lock",
+      path: `evidence[${evidenceIndex}].excludesCharacterIds`,
+      message:
+        'direct scene evidence "evidence_brass_bookend" independently excludes every other suspect; move suspect exclusions to non-direct evidence',
+    });
+  });
+
   it("requires two dialogue-derived evidence items in the required solution chain", async () => {
     const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
     const withoutRequiredDialogue = structuredClone(tutorialCase);

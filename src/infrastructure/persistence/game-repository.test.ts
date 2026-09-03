@@ -187,14 +187,15 @@ describe("GameRepository", () => {
 
     const cases = await repository.listReadyCases();
     expect(cases.filter((caseItem) => caseItem.source === "tutorial")).toEqual([
-      expect.objectContaining({ id: "case_rainy_study", title: "雨夜书房" }),
+      expect.objectContaining({ id: "case_rainy_study_v3", title: "雨夜书房" }),
     ]);
   });
 
-  it("shows only the current tutorial when a legacy tutorial ledger remains", async () => {
+  it("publishes the current tutorial without overwriting the prior tutorial ledger", async () => {
     const legacyTutorial = parseCaseArtifact({
       ...tutorialCase,
-      id: "case_rainy_study_v2",
+      id: "case_rainy_study",
+      seed: "tutorial-rainy-study-v1",
       title: "雨夜书房（旧教程）",
     });
     const player = await repository.createAnonymousIdentity();
@@ -203,8 +204,12 @@ describe("GameRepository", () => {
     const lobby = await new GameService(repository).getLobby(player.playerId);
 
     expect(lobby.cases.filter((caseItem) => caseItem.source === "tutorial")).toEqual([
-      expect.objectContaining({ id: "case_rainy_study", title: "雨夜书房" }),
+      expect.objectContaining({ id: "case_rainy_study_v3", title: "雨夜书房" }),
     ]);
+    await expect(repository.getReadyCase("case_rainy_study")).resolves.toMatchObject({
+      id: "case_rainy_study",
+      title: "雨夜书房（旧教程）",
+    });
   });
 
   it("queues durable work and records model telemetry", async () => {

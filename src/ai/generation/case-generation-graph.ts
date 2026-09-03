@@ -4,11 +4,14 @@ import { z } from "zod";
 
 import {
   createModelCallAudit,
+  createModelCallAuditFromStructuredOutputParseError,
   createModelCallAuditFromStructuredOutputValidationError,
   modelCallAuditSchema,
 } from "@/ai/model-audit";
 import {
+  isStructuredOutputParseError,
   isStructuredOutputValidationError,
+  type StructuredModelResult,
   type StructuredModelProvider,
   type StructuredOutputValidationError,
 } from "@/ai/model-provider";
@@ -18,8 +21,12 @@ import {
   caseArtifactRepairPatchSchema,
   parseCaseArtifact,
   type CaseArtifact,
+  type CaseArtifactRepairPatch,
 } from "@/domain/case/case-artifact";
-import { findReachableEvidenceIds } from "@/domain/case/evidence-reachability";
+import {
+  findInitiallyDiscoverableSceneEvidenceIds,
+  findReachableEvidenceIds,
+} from "@/domain/case/evidence-reachability";
 import { validatePublishableCaseArtifact } from "@/domain/case/case-validator";
 
 import {
@@ -27,6 +34,11 @@ import {
   buildCaseDraftMessages,
   buildCaseRepairMessages,
 } from "./generation-prompts";
+import {
+  deriveGenerationPlan,
+  validateGeneratedCharacterPlan,
+  validateInitialScenePacing,
+} from "./generation-plan";
 import {
   blindSolveResultSchema,
   caseGenerationRequestSchema,
@@ -174,10 +186,13 @@ export function createCaseGenerationGraph(
         message: `expected seed "${state.request.seed}"`,
       });
     }
+    const generationPlan = deriveGenerationPlan(state.request.seed);
     return {
       validationIssues: [
         ...report.issues,
         ...requestIssues,
+        ...validateGeneratedCharacterPlan(state.draft, generationPlan),
+        ...validateInitialScenePacing(state.draft),
         ...state.formatRepairTargets.map(formatRepairIssue),
       ],
     };
@@ -198,6 +213,8 @@ export function createCaseGenerationGraph(
       draft: state.draft,
       issues: state.validationIssues,
     });
+    let completedRepairResult: StructuredModelResult<CaseArtifactRepairPatch> | null =
+      null;
     try {
       const result = await provider.invokeStructured({
         tier: "pro",
@@ -208,6 +225,7 @@ export function createCaseGenerationGraph(
         // 局部补丁只含问题字段：上限远小于完整案件，避免失败修复比重新生成更慢。
         maxTokens: repairPatchMaxTokens,
       });
+      completedRepairResult = result;
       return {
         attempt: state.attempt + 1,
         draft: compileMinimumSolutionChain(
@@ -225,6 +243,28 @@ export function createCaseGenerationGraph(
       };
     } catch (error) {
       if (!isRecoverableRepairFormatError(error)) throw error;
+      const formatFailureAudit = isStructuredOutputValidationError(error)
+        ? createModelCallAuditFromStructuredOutputValidationError(
+            "case_repair_format_recovery",
+            "pro",
+            messages,
+            error,
+          )
+        : isStructuredOutputParseError(error)
+          ? createModelCallAuditFromStructuredOutputParseError(
+              "case_repair_parse_recovery",
+              "pro",
+              messages,
+              error,
+            )
+          : completedRepairResult
+            ? createModelCallAudit(
+                "case_repair_apply_recovery",
+                "pro",
+                messages,
+                completedRepairResult,
+              )
+            : null;
       console.warn("[generation-repair] invalid patch response; retrying", {
         attempt: state.attempt,
         maxArtifactAttempts,
@@ -232,7 +272,14 @@ export function createCaseGenerationGraph(
       });
       // 结构化输出偶发不合规时保留原案卷并消耗一次轻量修复预算；下轮会带着同一批
       // validator issues 再请求补丁，而不是把一次格式波动直接暴露给玩家。
-      return { attempt: state.attempt + 1, draft: state.draft, blindSolve: null };
+      return {
+        attempt: state.attempt + 1,
+        draft: state.draft,
+        blindSolve: null,
+        modelCalls: formatFailureAudit
+          ? [...state.modelCalls, formatFailureAudit]
+          : state.modelCalls,
+      };
     }
   };
 
@@ -354,6 +401,12 @@ export function blindSolveSupportsConclusion(
 function isRecoverableRepairFormatError(error: unknown) {
   if (error instanceof z.ZodError) return true;
   if (
+    isStructuredOutputParseError(error) &&
+    error.schemaName === "case_artifact_repair_patch"
+  ) {
+    return true;
+  }
+  if (
     isStructuredOutputValidationError(error) &&
     error.schemaName === "case_artifact_repair_patch"
   ) {
@@ -473,39 +526,58 @@ function readNonEmptyString(value: unknown) {
 /**
  * 将模型已声明的 solution 元数据编译为解题器可检查的最小证据链。
  *
- * 这一步不选择或替换真凶、动机、手法，也不改写玩家可见文案；它只补齐模型经常
- * 遗漏的 supports/implicates/excludes 关系。随后仍必须通过盲解，避免“字段正确、
- * 故事不通”的案件被发布。
+ * 这一步不选择或替换真凶、动机、手法；它会闭合可确定修复的列表引用、补齐模型
+ * 经常遗漏的 supports/implicates/excludes 关系，并把首发证据中的嫌疑人姓名替换为
+ * 中性称谓。随后仍必须通过盲解，避免“字段正确、故事不通”的案件被发布。
  */
 export function compileMinimumSolutionChain(
   caseArtifact: CaseArtifact,
 ): CaseArtifact {
-  const suspectIds = caseArtifact.characters
+  // 先做只涉及“已存在实体”的无损闭包，避免把可确定修复的悬空列表引用和
+  // 角色知识边界交给概率性补丁。无法安全推断的标量引用仍保留给 validator。
+  const referenceClosedCaseArtifact = normalizeRepairableReferenceDrift(
+    caseArtifact,
+  );
+  // 现场物证能支撑手法或时间线，但不应直接承担“排除全部其他嫌疑人”的关系。
+  // 这一步只移除过强的结构标记；后续仍由编译链和发布校验确保非现场证据可以
+  // 独立完成排除，避免把一份失去唯一解的案卷静默发布。
+  const normalizedCaseArtifact = normalizePrematureSceneEvidence(
+    referenceClosedCaseArtifact,
+  );
+  const suspectIds = normalizedCaseArtifact.characters
     .filter((character) => character.roleTier === "suspect")
     .map((character) => character.id);
-  const culpritId = caseArtifact.culpritId;
+  const culpritId = normalizedCaseArtifact.culpritId;
   const otherSuspectIds = suspectIds.filter((id) => id !== culpritId);
   const evidenceById = new Map(
-    caseArtifact.evidence.map((evidence) => [evidence.id, evidence]),
+    normalizedCaseArtifact.evidence.map((evidence) => [evidence.id, evidence]),
   );
-  const reachableEvidenceIds = findReachableEvidenceIds(caseArtifact);
+  const initialSceneEvidenceIds = findInitiallyDiscoverableSceneEvidenceIds(
+    normalizedCaseArtifact,
+  );
+  const reachableEvidenceIds = findReachableEvidenceIds(normalizedCaseArtifact);
   const candidateEvidenceIds = uniqueIds([
-    ...caseArtifact.solution.requiredEvidenceIds,
+    ...normalizedCaseArtifact.solution.requiredEvidenceIds,
     ...reachableEvidenceIds,
-  ]).filter((id) => evidenceById.has(id) && reachableEvidenceIds.has(id));
+  ]).filter(
+    (id) =>
+      evidenceById.has(id) &&
+      reachableEvidenceIds.has(id) &&
+      !initialSceneEvidenceIds.has(id),
+  );
 
   if (
     suspectIds.length !== 4 ||
     otherSuspectIds.length !== 3 ||
     candidateEvidenceIds.length < 5 ||
-    !caseArtifact.facts.some(
-      (fact) => fact.id === caseArtifact.solution.motiveFactId,
+    !normalizedCaseArtifact.facts.some(
+      (fact) => fact.id === normalizedCaseArtifact.solution.motiveFactId,
     ) ||
-    !caseArtifact.facts.some(
-      (fact) => fact.id === caseArtifact.solution.methodFactId,
+    !normalizedCaseArtifact.facts.some(
+      (fact) => fact.id === normalizedCaseArtifact.solution.methodFactId,
     )
   ) {
-    return caseArtifact;
+    return normalizedCaseArtifact;
   }
 
   const directSceneEvidenceIds = new Set(
@@ -522,26 +594,42 @@ export function compileMinimumSolutionChain(
   );
   // 现场法证可以支撑推理，但不能被编译器自动拼成三条以内的直指结论。
   // 决定性链条必须跨过人物对话和非现场直证，保留玩家调查与交叉验证的空间。
-  const interviewEvidenceIds = nonDirectEvidenceIds.filter((id) => {
+  const allInterviewEvidenceIds = nonDirectEvidenceIds.filter((id) => {
     const evidence = evidenceById.get(id);
     return (
       evidence?.discovery.method === "interview" &&
       Boolean(evidence.discovery.characterId)
     );
   });
+  const characterById = new Map(
+    normalizedCaseArtifact.characters.map((character) => [character.id, character]),
+  );
+  const witnessInterviewEvidenceIds = allInterviewEvidenceIds.filter((id) => {
+    const characterId = evidenceById.get(id)?.discovery.characterId;
+    return characterById.get(characterId ?? "")?.roleTier === "witness";
+  });
+  const interviewEvidenceIds = takeDistinctInterviewCharacters(
+    witnessInterviewEvidenceIds,
+    evidenceById,
+    2,
+  );
+  const requiredInterviewEvidenceIds =
+    interviewEvidenceIds.length === 2
+      ? interviewEvidenceIds
+      : takeDistinctInterviewCharacters(allInterviewEvidenceIds, evidenceById, 2);
   // Keep two witness conversations in the decisive chain. If the draft does not
   // contain them, publication validation will send it through the repair pass.
-  if (interviewEvidenceIds.length < 2) {
-    return caseArtifact;
+  if (requiredInterviewEvidenceIds.length < 2) {
+    return normalizedCaseArtifact;
   }
   const nonInterviewEvidenceIds = nonDirectEvidenceIds.filter(
-    (id) => !interviewEvidenceIds.includes(id),
+    (id) => !allInterviewEvidenceIds.includes(id),
   );
   if (nonInterviewEvidenceIds.length < 3) {
-    return caseArtifact;
+    return normalizedCaseArtifact;
   }
   const requiredEvidenceIds = [
-    ...interviewEvidenceIds.slice(0, 2),
+    ...requiredInterviewEvidenceIds,
     ...nonInterviewEvidenceIds.slice(0, 3),
   ];
   const chainIndexByEvidenceId = new Map(
@@ -549,8 +637,8 @@ export function compileMinimumSolutionChain(
   );
 
   return {
-    ...caseArtifact,
-    evidence: caseArtifact.evidence.map((evidence) => {
+    ...normalizedCaseArtifact,
+    evidence: normalizedCaseArtifact.evidence.map((evidence) => {
       const chainIndex = chainIndexByEvidenceId.get(evidence.id);
       const excludesCharacterIds = evidence.excludesCharacterIds.filter(
         (id) => id !== culpritId,
@@ -563,12 +651,12 @@ export function compileMinimumSolutionChain(
         chainIndex === 0
           ? uniqueIds([
               ...evidence.supportsFactIds,
-              caseArtifact.solution.motiveFactId,
+              normalizedCaseArtifact.solution.motiveFactId,
             ])
           : chainIndex === 1
             ? uniqueIds([
                 ...evidence.supportsFactIds,
-                caseArtifact.solution.methodFactId,
+                normalizedCaseArtifact.solution.methodFactId,
               ])
             : evidence.supportsFactIds;
       const implicatesCharacterIds =
@@ -595,10 +683,224 @@ export function compileMinimumSolutionChain(
       };
     }),
     solution: {
-      ...caseArtifact.solution,
+      ...normalizedCaseArtifact.solution,
       requiredEvidenceIds,
     },
   };
+}
+
+/**
+ * 关闭生成模型最常见的列表引用漂移。
+ *
+ * 未声明实体的列表引用不可能承载有效语义，删除它们不会丢失可用信息；秘密、
+ * 谎言规则及真凶自身的动机/手法则已经声明了角色必须知道的事实，因此补入
+ * knowledge 是确定性的。标量拓扑（例如未知 culpritId）没有安全默认值，继续由
+ * validator 和 repair 模型处理。
+ */
+function normalizeRepairableReferenceDrift(
+  caseArtifact: CaseArtifact,
+): CaseArtifact {
+  const characterIds = new Set(
+    caseArtifact.characters.map((character) => character.id),
+  );
+  const factIds = new Set(caseArtifact.facts.map((fact) => fact.id));
+  const claimIds = new Set(caseArtifact.claims.map((claim) => claim.id));
+  const evidenceIds = new Set(caseArtifact.evidence.map((evidence) => evidence.id));
+  const timelineEventIds = new Set(caseArtifact.timeline.map((event) => event.id));
+  const evidenceIdsByObjectId = new Map<string, string[]>();
+  for (const evidence of caseArtifact.evidence) {
+    const objectId = evidence.discovery.objectId;
+    if (!objectId) continue;
+    const objectEvidenceIds = evidenceIdsByObjectId.get(objectId) ?? [];
+    objectEvidenceIds.push(evidence.id);
+    evidenceIdsByObjectId.set(objectId, objectEvidenceIds);
+  }
+  const knownIds = <T extends string>(ids: readonly T[], validIds: ReadonlySet<string>) =>
+    uniqueIds(ids.filter((id) => validIds.has(id)));
+
+  return {
+    ...caseArtifact,
+    characters: caseArtifact.characters.map((character) => {
+      const secretFactIds = knownIds(character.secretFactIds, factIds);
+      const lieRules = character.lieRules.filter((rule) => factIds.has(rule.factId));
+      const selfKnowledgeFactIds =
+        character.id === caseArtifact.culpritId
+          ? [
+              caseArtifact.solution.motiveFactId,
+              caseArtifact.solution.methodFactId,
+            ].filter((factId) => factIds.has(factId))
+          : [];
+      return {
+        ...character,
+        knowledge: {
+          factIds: uniqueIds([
+            ...knownIds(character.knowledge.factIds, factIds),
+            ...secretFactIds,
+            ...lieRules.map((rule) => rule.factId),
+            ...selfKnowledgeFactIds,
+          ]),
+          evidenceIds: knownIds(character.knowledge.evidenceIds, evidenceIds),
+          claimIds: knownIds(character.knowledge.claimIds, claimIds),
+        },
+        secretFactIds,
+        lieRules,
+      };
+    }),
+    scenes: caseArtifact.scenes.map((scene) => ({
+      ...scene,
+      objects: scene.objects.map((object) => ({
+        ...object,
+        // discovery.objectId 是证据获取路径的主声明；同时利用它恢复模型遗漏或
+        // 写错的物件反向索引，保证清理悬空 ID 后调查入口仍然存在。
+        evidenceIds: uniqueIds([
+          ...knownIds(object.evidenceIds, evidenceIds),
+          ...(evidenceIdsByObjectId.get(object.id) ?? []),
+        ]),
+      })),
+    })),
+    timeline: caseArtifact.timeline.map((event) => ({
+      ...event,
+      characterIds: knownIds(event.characterIds, characterIds),
+      factIds: knownIds(event.factIds, factIds),
+    })),
+    claims: caseArtifact.claims.map((claim) => ({
+      ...claim,
+      factIds: knownIds(claim.factIds, factIds),
+    })),
+    evidence: caseArtifact.evidence.map((evidence) => ({
+      ...evidence,
+      supportsFactIds: knownIds(evidence.supportsFactIds, factIds),
+      contradictsClaimIds: knownIds(evidence.contradictsClaimIds, claimIds),
+      implicatesCharacterIds: knownIds(
+        evidence.implicatesCharacterIds,
+        characterIds,
+      ),
+      excludesCharacterIds: knownIds(evidence.excludesCharacterIds, characterIds),
+      discovery: {
+        ...evidence.discovery,
+        prerequisiteEvidenceIds: knownIds(
+          evidence.discovery.prerequisiteEvidenceIds,
+          evidenceIds,
+        ),
+      },
+    })),
+    unlockRules: caseArtifact.unlockRules.map((rule) => ({
+      ...rule,
+      allEvidenceIds: knownIds(rule.allEvidenceIds, evidenceIds),
+      anyEvidenceIds: knownIds(rule.anyEvidenceIds, evidenceIds),
+    })),
+    solution: {
+      ...caseArtifact.solution,
+      requiredEvidenceIds: knownIds(
+        caseArtifact.solution.requiredEvidenceIds,
+        evidenceIds,
+      ),
+      requiredTimelineEventIds: knownIds(
+        caseArtifact.solution.requiredTimelineEventIds,
+        timelineEventIds,
+      ),
+    },
+  };
+}
+
+function normalizePrematureSceneEvidence(caseArtifact: CaseArtifact): CaseArtifact {
+  const initialSceneEvidenceIds = findInitiallyDiscoverableSceneEvidenceIds(
+    caseArtifact,
+  );
+  const factById = new Map(caseArtifact.facts.map((fact) => [fact.id, fact]));
+  const sensitiveFactTypes = new Set([
+    "identity",
+    "motive",
+    "method",
+    "opportunity",
+    "alibi",
+  ]);
+  const suspectNames = caseArtifact.characters
+    .filter((character) => character.roleTier === "suspect")
+    .map((character) => character.name);
+  let changed = false;
+  const evidence = caseArtifact.evidence.map((item) => {
+    const isInitialSceneEvidence = initialSceneEvidenceIds.has(item.id);
+    const mustClearDirectExclusions = isDirectScenePhysicalOrForensicEvidence(item);
+    const supportsFactIds = isInitialSceneEvidence
+      ? item.supportsFactIds.filter(
+          (factId) => {
+            const fact = factById.get(factId);
+            return (
+              !sensitiveFactTypes.has(fact?.type ?? "") &&
+              !suspectNames.some((name) => fact?.statement.includes(name))
+            );
+          },
+        )
+      : item.supportsFactIds;
+    const implicatesCharacterIds = isInitialSceneEvidence
+      ? []
+      : item.implicatesCharacterIds;
+    const excludesCharacterIds =
+      isInitialSceneEvidence || mustClearDirectExclusions
+        ? []
+        : item.excludesCharacterIds;
+    const name = isInitialSceneEvidence
+      ? redactSuspectNames(item.name, suspectNames)
+      : item.name;
+    const description = isInitialSceneEvidence
+      ? redactSuspectNames(item.description, suspectNames)
+      : item.description;
+    if (
+      supportsFactIds.length === item.supportsFactIds.length &&
+      implicatesCharacterIds.length === item.implicatesCharacterIds.length &&
+      excludesCharacterIds.length === item.excludesCharacterIds.length &&
+      name === item.name &&
+      description === item.description
+    ) {
+      return item;
+    }
+    changed = true;
+    return {
+      ...item,
+      name,
+      description,
+      supportsFactIds,
+      implicatesCharacterIds,
+      excludesCharacterIds,
+    };
+  });
+
+  return changed ? { ...caseArtifact, evidence } : caseArtifact;
+}
+
+function redactSuspectNames(text: string, suspectNames: readonly string[]) {
+  return suspectNames.reduce(
+    (redacted, suspectName) =>
+      redacted.replaceAll(suspectName, "某位涉案人员"),
+    text,
+  );
+}
+
+function takeDistinctInterviewCharacters(
+  evidenceIds: string[],
+  evidenceById: ReadonlyMap<string, CaseArtifact["evidence"][number]>,
+  count: number,
+) {
+  const characterIds = new Set<string>();
+  const selectedEvidenceIds: string[] = [];
+  for (const evidenceId of evidenceIds) {
+    const characterId = evidenceById.get(evidenceId)?.discovery.characterId;
+    if (!characterId || characterIds.has(characterId)) continue;
+    characterIds.add(characterId);
+    selectedEvidenceIds.push(evidenceId);
+    if (selectedEvidenceIds.length === count) break;
+  }
+  return selectedEvidenceIds;
+}
+
+function isDirectScenePhysicalOrForensicEvidence(
+  evidence: CaseArtifact["evidence"][number],
+) {
+  return (
+    Boolean(evidence.discovery.sceneId) &&
+    (evidence.kind === "physical" || evidence.kind === "forensic")
+  );
 }
 
 function uniqueIds(ids: Iterable<string>): string[] {

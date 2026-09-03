@@ -2,9 +2,9 @@ import { parseCaseArtifact } from "@/domain/case/case-artifact";
 
 export const tutorialCase = parseCaseArtifact({
   schemaVersion: 1,
-  // MVP 只提供一个稳定教程；修改其内容时需显式迁移或清理旧教程数据，不能并列展示重复案例。
-  id: "case_rainy_study",
-  seed: "tutorial-rainy-study-v1",
+  // 教程案件是真相账本的一次发布；内容变更必须升级版本，旧账本只服务历史存档。
+  id: "case_rainy_study_v3",
+  seed: "tutorial-rainy-study-v3",
   title: "雨夜书房",
   briefing:
     "暴雨夜，收藏家顾明远在自家举办了一场临时晚宴，几名与他关系紧张的客人都没有离开顾宅。晚宴临近结束时，二楼书房传来一声闷响；等众人赶到，顾明远已经倒在书桌旁。房门和窗户都没有遭到破坏，宅内的暴雨也切断了外出的可能。顾宅被暂时封闭，四名嫌疑人各自给出了一段看似完整的说法。",

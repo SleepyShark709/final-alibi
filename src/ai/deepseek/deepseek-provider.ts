@@ -9,6 +9,7 @@ import { ChatDeepSeek } from "@langchain/deepseek";
 import { z } from "zod";
 
 import {
+  StructuredOutputParseError,
   StructuredOutputValidationError,
   type ModelMessage,
   type ModelTier,
@@ -121,7 +122,7 @@ export class DeepSeekModelProvider implements StructuredModelProvider {
         .invoke(messages, { signal: request.signal });
       const parsed = parseJsonMessage(raw);
       if (parsed === null) {
-        throw noParseableJsonError(request.schemaName, raw);
+        throw noParseableJsonError(request.schemaName, modelName, raw);
       }
       const usage = extractUsage(raw);
       const rawResponse = serializeMessage(raw);
@@ -151,9 +152,7 @@ export class DeepSeekModelProvider implements StructuredModelProvider {
     // function-calling 响应若缺少 tool call，LangChain 会返回 parsed=null；把这类
     // Provider 边界错误与 schema 字段错误区分开，避免 Worker 只留下模糊的 Zod 报错。
     if (result.parsed === null || result.parsed === undefined) {
-      throw new Error(
-        `DeepSeek returned no parseable JSON for structured output "${request.schemaName}"`,
-      );
+      throw noParseableJsonError(request.schemaName, modelName, result.raw);
     }
     const usage = extractUsage(result.raw);
     const rawResponse = serializeMessage(result.raw);
@@ -318,13 +317,17 @@ function formatDiagnosticValue(value: unknown) {
     : `${serialized.slice(0, 237)}...`;
 }
 
-function noParseableJsonError(schemaName: string, message: BaseMessage): Error {
-  return new Error(
-    "DeepSeek returned no parseable JSON for structured output \"" +
-      schemaName +
-      "\" (" +
-      jsonResponseSummary(message) +
-      ")",
+function noParseableJsonError(
+  schemaName: string,
+  model: string,
+  message: BaseMessage,
+): StructuredOutputParseError {
+  return new StructuredOutputParseError(
+    schemaName,
+    model,
+    extractUsage(message),
+    serializeMessage(message),
+    jsonResponseSummary(message),
   );
 }
 

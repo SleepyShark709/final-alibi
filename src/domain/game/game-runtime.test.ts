@@ -423,6 +423,48 @@ describe("deterministic game runtime", () => {
     );
   });
 
+  it("keeps initial scene discoveries as anonymous, unconfirmed leads", () => {
+    const initialSceneSearches = [
+      ["command_initial_tea", "化验茶水"],
+      ["command_initial_bookend", "检查黄铜书挡"],
+      ["command_initial_ledger", "翻找书桌抽屉"],
+    ] as const;
+    const investigated = initialSceneSearches.reduce(
+      (session, [commandId, text]) =>
+        performInvestigation(tutorialCase, session, {
+          commandId,
+          text,
+          sceneId: "scene_study",
+        }).session,
+      newSession(),
+    );
+
+    const earlyView = getPlayerCaseView(tutorialCase, investigated);
+    const earlyDeductions = JSON.stringify(earlyView.deductions);
+    const earlyEvidence = JSON.stringify(earlyView.evidence);
+
+    expect(earlyDeductions).not.toContain("李闻舟");
+    expect(earlyDeductions).not.toContain("凶手先在茶中加入镇静剂");
+    expect(earlyDeductions).toContain("尚待交叉核验");
+    expect(earlyEvidence).not.toContain("李闻舟");
+    expect(earlyView.reportOptions.motiveFacts).toEqual([
+      {
+        id: "fact_motive_embezzlement",
+        statement: "发现了可能的作案动机线索，尚待交叉核验。",
+      },
+    ]);
+
+    const completedView = getPlayerCaseView(
+      tutorialCase,
+      discoverRequiredEvidence(newSession()),
+    );
+    expect(
+      completedView.deductions.find(
+        (fact) => fact.id === tutorialCase.solution.methodFactId,
+      )?.statement,
+    ).toBe("凶手先在茶中加入镇静剂，再使用黄铜书挡实施致命袭击。");
+  });
+
   it("rejects a character disclosing another person's claim", () => {
     expect(() =>
       recordDialogueTurn(tutorialCase, newSession(), {

@@ -347,12 +347,27 @@ export function validatePublishableCaseArtifact(
           "multiple direct scene physical or forensic clues explicitly name the culprit",
       });
     }
-    if (directEvidenceLocksCulprit(caseArtifact, directSceneEvidence, culprit.id)) {
+    const lockingEvidenceIds = findDirectEvidenceLockingChain(
+      caseArtifact,
+      directSceneEvidence,
+      culprit.id,
+    );
+    if (lockingEvidenceIds) {
+      const firstEvidenceId = lockingEvidenceIds[0];
+      const firstEvidenceIndex = caseArtifact.evidence.findIndex(
+        (evidence) => evidence.id === firstEvidenceId,
+      );
       issues.push({
         code: "premature_direct_evidence_lock",
-        path: "evidence",
+        path:
+          firstEvidenceIndex < 0
+            ? "evidence"
+            : `evidence[${firstEvidenceIndex}].excludesCharacterIds`,
         message:
-          "one to three direct scene physical or forensic clues independently identify the culprit",
+          `direct scene evidence ${lockingEvidenceIds
+            .map((evidenceId) => `"${evidenceId}"`)
+            .join(", ")} independently excludes every other suspect; ` +
+          "move suspect exclusions to non-direct evidence",
       });
     }
   }
@@ -436,18 +451,18 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function directEvidenceLocksCulprit(
+function findDirectEvidenceLockingChain(
   caseArtifact: CaseArtifact,
   evidence: CaseArtifact["evidence"],
   culpritId: string,
-) {
+): string[] | null {
   const otherSuspectIds = caseArtifact.characters
     .filter(
       (character) =>
         character.roleTier === "suspect" && character.id !== culpritId,
     )
     .map((character) => character.id);
-  if (otherSuspectIds.length === 0) return false;
+  if (otherSuspectIds.length === 0) return null;
 
   const suspectBitById = new Map(
     otherSuspectIds.map((suspectId, index) => [suspectId, 1 << index]),
@@ -473,7 +488,7 @@ function directEvidenceLocksCulprit(
           result.candidateIds.length === 1 &&
           result.candidateIds[0] === culpritId
         ) {
-          return true;
+          return nextEvidenceIds;
         }
       }
       const prior = shortestChainByMask.get(nextMask);
@@ -483,7 +498,7 @@ function directEvidenceLocksCulprit(
     }
   }
 
-  return false;
+  return null;
 }
 
 interface EntityReference {

@@ -75,16 +75,32 @@ describe("DeepSeekModelProvider structured output", () => {
       proModel: "deepseek-v4-pro",
     });
 
-    await expect(
-      provider.invokeStructured({
+    const error = await provider
+      .invokeStructured({
         tier: "pro",
         schema: resultSchema,
         schemaName: "test_result",
         messages: [{ role: "user", content: "Return the test result." }],
-      }),
-    ).rejects.toThrow(
-      'DeepSeek returned no parseable JSON for structured output "test_result" (empty content, finish_reason=unknown)',
-    );
+      })
+      .then(
+        () => new Error("Expected JSON parsing to fail"),
+        (reason) => reason,
+      );
+
+    expect(error).toMatchObject({
+      name: "StructuredOutputParseError",
+      schemaName: "test_result",
+      model: "deepseek-v4-pro",
+      usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+      rawResponse: expect.objectContaining({ content: "" }),
+      diagnostic: "empty content, finish_reason=unknown",
+    });
+    expect(error).toBeInstanceOf(Error);
+    if (error instanceof Error) {
+      expect(error.message).toBe(
+        'DeepSeek returned no parseable JSON for structured output "test_result" (empty content, finish_reason=unknown)',
+      );
+    }
   });
 
   it("identifies a model JSON object that does not satisfy the requested schema", async () => {

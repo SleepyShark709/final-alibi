@@ -1523,7 +1523,11 @@ function NotebookPanel(props: {
           ))}
         </section>
         <section>
-          <h3>已形成推论 <span>{props.view.deductions.length}</span></h3>
+          <h3>
+            {props.view.reportOptions.hasCompleteEvidenceChain
+              ? "已形成推论"
+              : "待核验推论"} <span>{props.view.deductions.length}</span>
+          </h3>
           {props.view.deductions.map((fact) => (
             <article key={fact.id}>
               <strong>{factTypeLabel(fact.type)}</strong>

@@ -12,7 +12,10 @@ import {
   type CaseGenerationRequest,
 } from "@/ai/generation/generation-schema";
 import type { ModelCallAudit } from "@/ai/model-audit";
-import type { StructuredModelProvider } from "@/ai/model-provider";
+import {
+  isStructuredOutputParseError,
+  type StructuredModelProvider,
+} from "@/ai/model-provider";
 import type { CaseArtifact } from "@/domain/case/case-artifact";
 import type {
   ClaimedJob,
@@ -222,7 +225,7 @@ export async function processNextCaseGenerationJob(
     );
     return { jobId: job.id, status: "succeeded" };
   } catch (error) {
-    const retryable = isTransientModelError(error);
+    const retryable = isRetryableGenerationError(error);
     const failure = describeGenerationError(error);
     const status = retryable && job.attempts < job.maxAttempts ? "retrying" : "failed";
 
@@ -247,8 +250,12 @@ export async function processNextCaseGenerationJob(
   }
 }
 
-function isTransientModelError(error: unknown) {
-  if (error instanceof CaseGenerationRejectedError) return false;
+function isRetryableGenerationError(error: unknown) {
+  // 图内局部修复已经耗尽后才会抛出这类拒绝；使用新的 generationId 重开草稿
+  // 比让玩家在 UI 中重新提交更可靠，同时仍受 job.maxAttempts 的硬上限约束。
+  if (error instanceof CaseGenerationRejectedError) return true;
+  // 首稿完全无法解析时没有可供图内局部修复的 draft，只能换新 thread 重生首稿。
+  if (isStructuredOutputParseError(error)) return true;
   if (typeof error !== "object" || error === null) return false;
   const candidate = error as { status?: number; code?: string };
   return (

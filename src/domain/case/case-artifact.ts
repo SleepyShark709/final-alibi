@@ -241,6 +241,14 @@ export const caseArtifactRepairPatchSchema = z
     victimId: entityIdSchema.optional(),
     culpritId: entityIdSchema.optional(),
     characters: z.array(characterPatchSchema).max(4).optional(),
+    // 局部修复也需要能纠正“生成过多配角”。严格限制为已有的 witness/referenced，
+    // 防止修复模型意外删掉受害者或嫌疑人而把案件结构整体打散。
+    removeCharacterIds: entityIdListSchema
+      .max(4)
+      .refine((ids) => new Set(ids).size === ids.length, {
+        message: "must not contain duplicate character ids",
+      })
+      .optional(),
     scenes: z.array(scenePatchSchema).max(4).optional(),
     sceneObjects: z.array(sceneObjectPatchSchema).max(8).optional(),
     facts: z.array(factPatchSchema).max(8).optional(),
@@ -264,6 +272,8 @@ export function applyCaseArtifactRepairPatch(
   caseArtifact: CaseArtifact,
   patch: CaseArtifactRepairPatch,
 ): CaseArtifact {
+  const characters = applyCharacterPatches(caseArtifact, patch);
+
   return caseArtifactSchema.parse({
     ...caseArtifact,
     ...(patch.title === undefined ? {} : { title: patch.title }),
@@ -271,7 +281,7 @@ export function applyCaseArtifactRepairPatch(
     ...(patch.setting === undefined ? {} : { setting: patch.setting }),
     ...(patch.victimId === undefined ? {} : { victimId: patch.victimId }),
     ...(patch.culpritId === undefined ? {} : { culpritId: patch.culpritId }),
-    characters: mergeRecordsById(caseArtifact.characters, patch.characters),
+    characters,
     scenes: applySceneObjectPatches(
       mergeRecordsById(caseArtifact.scenes, patch.scenes),
       patch.sceneObjects,
@@ -286,6 +296,33 @@ export function applyCaseArtifactRepairPatch(
       ? { ...caseArtifact.solution, ...patch.solution }
       : caseArtifact.solution,
   });
+}
+
+function applyCharacterPatches(
+  caseArtifact: CaseArtifact,
+  patch: CaseArtifactRepairPatch,
+): CaseArtifact["characters"] {
+  const removedCharacterIds = new Set(patch.removeCharacterIds ?? []);
+  if (removedCharacterIds.size === 0) {
+    return mergeRecordsById(caseArtifact.characters, patch.characters);
+  }
+
+  const charactersById = new Map(
+    caseArtifact.characters.map((character) => [character.id, character]),
+  );
+  const invalidRemovalIds = [...removedCharacterIds].filter((characterId) => {
+    const character = charactersById.get(characterId);
+    return !character || (character.roleTier !== "witness" && character.roleTier !== "referenced");
+  });
+  if (invalidRemovalIds.length > 0) {
+    throw new Error(
+      `repair patches can only remove existing supporting characters: ${invalidRemovalIds.join(", ")}`,
+    );
+  }
+
+  return mergeRecordsById(caseArtifact.characters, patch.characters).filter(
+    (character) => !removedCharacterIds.has(character.id),
+  );
 }
 
 function mergeRecordsById<T extends { id: string }>(

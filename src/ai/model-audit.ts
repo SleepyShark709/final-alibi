@@ -7,6 +7,7 @@ import {
 import type {
   ModelMessage,
   ModelTier,
+  StructuredOutputParseError,
   StructuredOutputValidationError,
   StructuredModelResult,
 } from "@/ai/model-provider";
@@ -64,6 +65,31 @@ export function createModelCallAuditFromStructuredOutputValidationError(
       structuredOutputValidation: {
         schemaName: error.schemaName,
         issues: error.issues,
+      },
+    },
+    occurredAt,
+  );
+}
+
+/** 无法解析 JSON 时也保留已产生的账单、原始响应与可检索诊断。 */
+export function createModelCallAuditFromStructuredOutputParseError(
+  task: string,
+  tier: ModelTier,
+  messages: ModelMessage[],
+  error: StructuredOutputParseError,
+  occurredAt = new Date(),
+): ModelCallAudit {
+  return createModelCallAuditFromResponse(
+    task,
+    tier,
+    messages,
+    error.model,
+    error.usage,
+    {
+      ...error.rawResponse,
+      structuredOutputParse: {
+        schemaName: error.schemaName,
+        diagnostic: error.diagnostic,
       },
     },
     occurredAt,

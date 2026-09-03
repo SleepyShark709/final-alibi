@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  StructuredModelProvider,
-  StructuredModelRequest,
-  StructuredModelResult,
+import {
+  StructuredOutputParseError,
+  type StructuredModelProvider,
+  type StructuredModelRequest,
+  type StructuredModelResult,
 } from "@/ai/model-provider";
 import { tutorialCase } from "@/content/tutorial/tutorial-case";
 import {
+  caseArtifactRepairPatchSchema,
   caseArtifactSchema,
   parseCaseArtifact,
+  type CaseArtifact,
 } from "@/domain/case/case-artifact";
 import { validatePublishableCaseArtifact } from "@/domain/case/case-validator";
 
@@ -17,14 +20,19 @@ import {
   compileMinimumSolutionChain,
   createCaseGenerationGraph,
 } from "./case-generation-graph";
-import { buildBlindSolveMessages, buildCaseDraftMessages } from "./generation-prompts";
+import {
+  buildBlindSolveMessages,
+  buildCaseDraftMessages,
+  buildCaseRepairMessages,
+} from "./generation-prompts";
+import { makeGeneratedCaseArtifact } from "./testing/make-generated-case-artifact";
 
 describe("case generation graph", () => {
   it("publishes a semantically valid case only after an independent blind solve", async () => {
     const artifact = generatedTutorial("case_generated_one", "seed-one");
     const provider = new ScriptedProvider([
       artifact,
-      blindResult(artifact.culpritId),
+      blindResult(artifact),
     ]);
     const graph = createCaseGenerationGraph(provider);
     const result = await graph.invoke(initialState("seed-one"));
@@ -48,7 +56,7 @@ describe("case generation graph", () => {
     const artifact = generatedTutorial("case_generated_progress", "seed-progress");
     const provider = new ScriptedProvider([
       artifact,
-      blindResult(artifact.culpritId),
+      blindResult(artifact),
     ]);
     const progress: Array<{ stage: string; progress: number }> = [];
     const graph = createCaseGenerationGraph(provider, {
@@ -74,7 +82,7 @@ describe("case generation graph", () => {
     const provider = new ScriptedProvider([
       invalid,
       { scenes: [valid.scenes[2]] },
-      blindResult(valid.culpritId),
+      blindResult(valid),
     ]);
     const graph = createCaseGenerationGraph(provider);
     const result = await graph.invoke(initialState("seed-two"));
@@ -91,6 +99,125 @@ describe("case generation graph", () => {
         "blind_case_solution",
       ],
       finalId: "case_generated_two",
+    });
+  });
+
+  it("repairs a seeded supporting-cast mismatch before publishing", async () => {
+    const valid = generatedTutorial(
+      "case_generated_seeded_cast",
+      "supporting-seed-1",
+    );
+    const addedCharacter = valid.characters.find(
+      (character) => character.roleTier === "referenced",
+    );
+    if (!addedCharacter) throw new Error("Generated fixture needs a referenced character");
+    const invalid = structuredClone(valid);
+    invalid.characters = invalid.characters.filter(
+      (character) => character.id !== addedCharacter.id,
+    );
+    const provider = new ScriptedProvider([
+      invalid,
+      { characters: [addedCharacter] },
+      blindResult(valid),
+    ]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("supporting-seed-1"));
+
+    expect({
+      attempts: result.attempt,
+      calls: provider.requests,
+      supportingCharacterCount: result.finalArtifact?.characters.filter(
+        (character) =>
+          character.roleTier === "witness" || character.roleTier === "referenced",
+      ).length,
+    }).toEqual({
+      attempts: 2,
+      calls: [
+        "case_artifact",
+        "case_artifact_repair_patch",
+        "blind_case_solution",
+      ],
+      supportingCharacterCount: 4,
+    });
+  });
+
+  it("removes an extra supporting character with a compact repair", async () => {
+    const valid = generatedTutorial(
+      "case_generated_seeded_cast_trim",
+      "supporting-seed-3",
+    );
+    const invalid = structuredClone(valid);
+    const witnessTemplate = invalid.characters.find(
+      (character) => character.roleTier === "witness",
+    );
+    if (!witnessTemplate) {
+      throw new Error("Generated fixture needs a witness template");
+    }
+    const extraCharacter = {
+      ...structuredClone(witnessTemplate),
+      id: "character_extra_referenced",
+      name: "外围关联人",
+      roleTier: "referenced" as const,
+      publicProfile: "与案件有外围关联，未参与核心事件。",
+      privateProfile: "没有掌握可用的案件线索。",
+      knowledge: { factIds: [], evidenceIds: [], claimIds: [] },
+      secretFactIds: [],
+      lieRules: [],
+    };
+    invalid.characters.push(extraCharacter);
+    const provider = new ScriptedProvider([
+      invalid,
+      { removeCharacterIds: [extraCharacter.id] },
+      blindResult(valid),
+    ]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("supporting-seed-3"));
+
+    expect({
+      attempts: result.attempt,
+      calls: provider.requests,
+      supportingCharacterCount: result.finalArtifact?.characters.filter(
+        (character) =>
+          character.roleTier === "witness" || character.roleTier === "referenced",
+      ).length,
+    }).toEqual({
+      attempts: 2,
+      calls: [
+        "case_artifact",
+        "case_artifact_repair_patch",
+        "blind_case_solution",
+      ],
+      supportingCharacterCount: 2,
+    });
+  });
+
+  it("normalizes a suspect name leaked by an initial scene clue", async () => {
+    const artifact = generatedTutorial(
+      "case_generated_initial_text",
+      "supporting-seed-0",
+    );
+    const invalid = structuredClone(artifact);
+    const leakedEvidence = invalid.evidence.find(
+      (evidence) => evidence.id === "evidence_teacup_residue",
+    );
+    if (!leakedEvidence) {
+      throw new Error("Generated fixture tea evidence is missing");
+    }
+    leakedEvidence.description = "陈默的门禁卡和玻璃碎片都留在现场。";
+    const provider = new ScriptedProvider([invalid, blindResult(invalid)]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("supporting-seed-0"));
+
+    expect({
+      attempts: result.attempt,
+      calls: provider.requests,
+      initialDescription: result.finalArtifact?.evidence.find(
+        (evidence) => evidence.id === leakedEvidence.id,
+      )?.description,
+    }).toMatchObject({
+      attempts: 1,
+      calls: ["case_artifact", "blind_case_solution"],
+      initialDescription: expect.not.stringContaining("陈默"),
     });
   });
 
@@ -125,7 +252,7 @@ describe("case generation graph", () => {
           },
         ],
       },
-      blindResult(valid.culpritId),
+      blindResult(valid),
     ]);
     const graph = createCaseGenerationGraph(provider);
     const result = await graph.invoke(initialState("seed-lie-rule"));
@@ -158,7 +285,7 @@ describe("case generation graph", () => {
 
   it("preflights reference closure and the decisive evidence chain before drafting", () => {
     const messages = buildCaseDraftMessages({
-      seed: "seed-preflight",
+      seed: "supporting-seed-1",
       theme: "现代宅邸中的封闭空间案件",
       difficulty: "standard",
     });
@@ -166,20 +293,62 @@ describe("case generation graph", () => {
     expect(messages[0]?.content).toContain("输出前必须先完成以下结构预检");
     expect(messages[0]?.content).toContain("所有引用都必须来自已列出的实体 ID");
     expect(messages[0]?.content).toContain("用这 5 条必要证据独立演算一次");
+    expect(messages[0]?.content).toContain(
+      "现场 physical/forensic 证据的 excludesCharacterIds 必须为空",
+    );
+    expect(messages[0]?.content).toContain("本局固定生成 4 名配角");
+    expect(messages[0]?.content).toContain("首发场景中的证据不得指向或排除任何嫌疑人");
   });
 
-  it("repairs a localized dangling reference with a compact patch instead of another full case", async () => {
+  it("keeps direct-evidence topology repairs compact and explicit", () => {
+    const messages = buildCaseRepairMessages({
+      request: {
+        seed: "seed-direct-repair",
+        theme: "现代宅邸中的封闭空间案件",
+        difficulty: "standard",
+      },
+      draft: tutorialCase,
+      issues: [
+        {
+          code: "premature_direct_evidence_lock",
+          path: "evidence[2].excludesCharacterIds",
+          message:
+            'direct scene evidence "evidence_brass_bookend" independently excludes every other suspect; move suspect exclusions to non-direct evidence',
+        },
+      ],
+    });
+
+    expect(messages[0]?.content).toContain(
+      "不得通过现场 physical/forensic 证据排除嫌疑人",
+    );
+    const payload = JSON.parse(messages[1]?.content ?? "{}");
+    expect(payload.repairSnapshot).not.toHaveProperty("playerFacingText");
+  });
+
+  it("repairs a localized discovery mismatch with a compact patch instead of another full case", async () => {
     const valid = generatedTutorial("case_generated_patch", "seed-patch");
     const invalid = structuredClone(valid);
-    invalid.scenes[0]!.objects[0]!.evidenceIds = ["evidence_missing"];
+    const mismatchedEvidence = invalid.evidence.find(
+      (evidence) => Boolean(evidence.discovery.objectId),
+    );
+    const validEvidence = valid.evidence.find(
+      (evidence) => evidence.id === mismatchedEvidence?.id,
+    );
+    const wrongScene = invalid.scenes.find(
+      (scene) => scene.id !== mismatchedEvidence?.discovery.sceneId,
+    );
+    if (!mismatchedEvidence || !validEvidence || !wrongScene) {
+      throw new Error("Generated fixture needs object evidence in multiple scenes");
+    }
+    mismatchedEvidence.discovery.sceneId = wrongScene.id;
     const provider = new ScriptedProvider([
       invalid,
       {
-        sceneObjects: [
-          { sceneId: valid.scenes[0]!.id, ...valid.scenes[0]!.objects[0] },
+        evidence: [
+          { id: validEvidence.id, discovery: validEvidence.discovery },
         ],
       },
-      blindResult(valid.culpritId),
+      blindResult(valid),
     ]);
     const graph = createCaseGenerationGraph(provider);
     const result = await graph.invoke(initialState("seed-patch"));
@@ -217,16 +386,12 @@ describe("case generation graph", () => {
   it("retries a malformed compact patch before rejecting the case", async () => {
     const valid = generatedTutorial("case_generated_patch_retry", "seed-patch-retry");
     const invalid = structuredClone(valid);
-    invalid.scenes[0]!.objects[0]!.evidenceIds = ["evidence_missing"];
+    invalid.scenes = invalid.scenes.slice(0, 2);
     const provider = new ScriptedProvider([
       invalid,
       { unsupportedPatchField: true },
-      {
-        sceneObjects: [
-          { sceneId: valid.scenes[0]!.id, ...valid.scenes[0]!.objects[0] },
-        ],
-      },
-      blindResult(valid.culpritId),
+      { scenes: [valid.scenes[2]] },
+      blindResult(valid),
     ]);
     const graph = createCaseGenerationGraph(provider);
     const result = await graph.invoke(initialState("seed-patch-retry"));
@@ -245,6 +410,198 @@ describe("case generation graph", () => {
         "blind_case_solution",
       ],
     });
+  });
+
+  it("audits malformed and unparseable repair responses before retrying them", async () => {
+    const valid = generatedTutorial(
+      "case_generated_patch_audit",
+      "seed-patch-audit",
+    );
+    const invalid = structuredClone(valid);
+    invalid.scenes = invalid.scenes.slice(0, 2);
+    const malformedPatch = structuredRepairOutputValidationError({
+      unsupportedPatchField: true,
+    });
+    const unparseablePatch = new StructuredOutputParseError(
+      "case_artifact_repair_patch",
+      "mock-deepseek-pro",
+      { inputTokens: 700, cachedInputTokens: 0, outputTokens: 80 },
+      { content: "修复建议如下，但没有 JSON。" },
+      "content 14 chars, finish_reason=stop",
+    );
+    const provider = new ScriptedProvider([
+      invalid,
+      malformedPatch,
+      unparseablePatch,
+      { scenes: [valid.scenes[2]] },
+      blindResult(valid),
+    ]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("seed-patch-audit"));
+
+    expect(result.modelCalls.map((call) => call.task)).toEqual([
+      "case_draft",
+      "case_repair_format_recovery",
+      "case_repair_parse_recovery",
+      "case_repair",
+      "blind_solve",
+    ]);
+    expect(result.modelCalls[1]?.response).toMatchObject({
+      structuredOutputValidation: {
+        schemaName: "case_artifact_repair_patch",
+      },
+    });
+    expect(result.modelCalls[2]?.response).toMatchObject({
+      structuredOutputParse: {
+        schemaName: "case_artifact_repair_patch",
+        diagnostic: "content 14 chars, finish_reason=stop",
+      },
+    });
+  });
+
+  it("audits a valid repair patch that cannot be merged into the case", async () => {
+    const valid = generatedTutorial(
+      "case_generated_patch_apply_audit",
+      "seed-patch-apply-audit",
+    );
+    const invalid = structuredClone(valid);
+    invalid.scenes = invalid.scenes.slice(0, 2);
+    const provider = new ScriptedProvider([
+      invalid,
+      { characters: [{ id: "character_incomplete_new" }] },
+      { scenes: [valid.scenes[2]] },
+      blindResult(valid),
+    ]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState("seed-patch-apply-audit"));
+
+    expect(result.modelCalls.map((call) => call.task)).toEqual([
+      "case_draft",
+      "case_repair_apply_recovery",
+      "case_repair",
+      "blind_solve",
+    ]);
+  });
+
+  it("normalizes recurring reference, knowledge, solution, and opening-scene drift", async () => {
+    const seed = "seed-systemic-normalization";
+    const invalid = structuredClone(
+      generatedTutorial("case_generated_systemic_normalization", seed),
+    );
+    const suspect = invalid.characters.find(
+      (character) => character.roleTier === "suspect",
+    );
+    const openingScene = invalid.scenes.find((scene) => scene.initiallyUnlocked);
+    const leakedEvidence = invalid.evidence.find(
+      (evidence) => evidence.id === "evidence_teacup_residue",
+    );
+    const secretFact = invalid.facts.find(
+      (fact) => suspect && !suspect.knowledge.factIds.includes(fact.id),
+    );
+    if (!suspect || !openingScene || !leakedEvidence || !secretFact) {
+      throw new Error("Generated fixture is missing normalization inputs");
+    }
+
+    suspect.knowledge.evidenceIds.push("evidence_missing_from_draft");
+    suspect.secretFactIds = [...suspect.secretFactIds, secretFact.id];
+    suspect.knowledge.factIds = suspect.knowledge.factIds.filter(
+      (factId) => factId !== secretFact.id,
+    );
+    invalid.evidence.forEach((evidence) => {
+      evidence.excludesCharacterIds = [];
+      if (evidence.discovery.method === "interview") {
+        evidence.discovery = {
+          ...evidence.discovery,
+          sceneId: openingScene.id,
+          prerequisiteEvidenceIds: [],
+        };
+      }
+    });
+    invalid.solution.requiredEvidenceIds = [invalid.evidence[0]!.id];
+    leakedEvidence.description = `${suspect.name}的门禁卡与玻璃碎片都留在现场。`;
+
+    const provider = new ScriptedProvider([invalid, blindResult(invalid)]);
+    const graph = createCaseGenerationGraph(provider);
+    const result = await graph.invoke(initialState(seed));
+
+    expect({
+      attempts: result.attempt,
+      calls: provider.requests,
+      valid: result.finalArtifact
+        ? validatePublishableCaseArtifact(result.finalArtifact).valid
+        : false,
+      knowledge: result.finalArtifact?.characters.find(
+        (character) => character.id === suspect.id,
+      )?.knowledge,
+      openingDescription: result.finalArtifact?.evidence.find(
+        (evidence) => evidence.id === leakedEvidence.id,
+      )?.description,
+    }).toMatchObject({
+      attempts: 1,
+      calls: ["case_artifact", "blind_case_solution"],
+      valid: true,
+      knowledge: {
+        factIds: expect.arrayContaining([secretFact.id]),
+        evidenceIds: expect.not.arrayContaining(["evidence_missing_from_draft"]),
+      },
+      openingDescription: expect.not.stringContaining(suspect.name),
+    });
+
+    const compiledAgain = compileMinimumSolutionChain(result.finalArtifact!);
+    expect(compiledAgain).toEqual(result.finalArtifact);
+  });
+
+  it("closes repairable list references across the generated artifact", () => {
+    const draft = structuredClone(
+      generatedTutorial("case_generated_reference_closure", "seed-reference-closure"),
+    );
+    const character = draft.characters[1]!;
+    const sceneObject = draft.scenes[0]!.objects[0]!;
+    const timelineEvent = draft.timeline[0]!;
+    const claim = draft.claims[0]!;
+    const evidence = draft.evidence[0]!;
+    const unlockRule = draft.unlockRules[0]!;
+
+    character.knowledge.factIds.push("fact_missing");
+    character.knowledge.evidenceIds.push("evidence_missing");
+    character.knowledge.claimIds.push("claim_missing");
+    character.secretFactIds.push("fact_missing");
+    character.lieRules.push({
+      factId: "fact_missing",
+      strategy: "deny",
+      coverStatement: "这条不存在的事实不应进入发布账本。",
+    });
+    sceneObject.evidenceIds = ["evidence_missing"];
+    timelineEvent.characterIds.push("character_missing");
+    timelineEvent.factIds.push("fact_missing");
+    claim.factIds.push("fact_missing");
+    evidence.supportsFactIds.push("fact_missing");
+    evidence.contradictsClaimIds.push("claim_missing");
+    evidence.implicatesCharacterIds.push("character_missing");
+    evidence.excludesCharacterIds.push("character_missing");
+    evidence.discovery.prerequisiteEvidenceIds.push("evidence_missing");
+    unlockRule.allEvidenceIds.push("evidence_missing");
+    unlockRule.anyEvidenceIds.push("evidence_missing");
+    draft.solution.requiredEvidenceIds.push("evidence_missing");
+    draft.solution.requiredTimelineEventIds.push("timeline_missing");
+
+    const compiled = compileMinimumSolutionChain(draft);
+    const danglingIssues = validatePublishableCaseArtifact(compiled).issues.filter(
+      (issue) => issue.code === "dangling_reference",
+    );
+
+    expect(danglingIssues).toEqual([]);
+    expect(
+      compiled.scenes[0]?.objects[0]?.evidenceIds,
+    ).toEqual(expect.arrayContaining(
+      compiled.evidence
+        .filter(
+          (item) =>
+            item.discovery.objectId === compiled.scenes[0]?.objects[0]?.id,
+        )
+        .map((item) => item.id),
+    ));
+    expect(compileMinimumSolutionChain(compiled)).toEqual(compiled);
   });
 
   it("compiles the declared solution into a reachable minimum evidence chain before validation", () => {
@@ -318,11 +675,75 @@ describe("case generation graph", () => {
     expect(directRequiredEvidenceIds).toEqual([]);
   });
 
+  it("normalizes suspect exclusions off direct scene physical and forensic clues", () => {
+    const draft = structuredClone(
+      generatedTutorial("case_generated_direct_normalized", "seed-direct-normalized"),
+    );
+    const directEvidence = draft.evidence.find(
+      (evidence) => evidence.id === "evidence_brass_bookend",
+    );
+    if (!directEvidence) throw new Error("Tutorial direct forensic evidence is missing");
+    directEvidence.excludesCharacterIds = draft.characters
+      .filter(
+        (character) =>
+          character.roleTier === "suspect" &&
+          character.id !== draft.culpritId,
+      )
+      .map((character) => character.id);
+
+    const compiled = compileMinimumSolutionChain(draft);
+
+    expect(
+      compiled.evidence.find(
+        (evidence) => evidence.id === "evidence_brass_bookend",
+      )?.excludesCharacterIds,
+    ).toEqual([]);
+    expect(validatePublishableCaseArtifact(compiled)).toEqual({
+      valid: true,
+      issues: [],
+    });
+  });
+
+  it("keeps initially discoverable scene clues out of the decisive chain", () => {
+    const draft = structuredClone(
+      generatedTutorial("case_generated_initial_pacing", "seed-initial-pacing"),
+    );
+
+    const compiled = compileMinimumSolutionChain(draft);
+    const initiallyAvailableEvidenceIds = [
+      "evidence_teacup_residue",
+      "evidence_brass_bookend",
+      "evidence_transfer_ledger",
+      "evidence_torn_audit_memo",
+    ];
+
+    expect(
+      compiled.solution.requiredEvidenceIds.filter((id) =>
+        initiallyAvailableEvidenceIds.includes(id),
+      ),
+    ).toEqual([]);
+    expect(
+      compiled.evidence
+        .filter((evidence) => initiallyAvailableEvidenceIds.includes(evidence.id))
+        .map((evidence) => ({
+          id: evidence.id,
+          implicates: evidence.implicatesCharacterIds,
+          excludes: evidence.excludesCharacterIds,
+        })),
+    ).toEqual(
+      initiallyAvailableEvidenceIds.map((id) => ({
+        id,
+        implicates: [],
+        excludes: [],
+      })),
+    );
+  });
+
   it("repairs a logically opaque case when the blind detective chooses differently", async () => {
     const artifact = generatedTutorial("case_generated_three", "seed-three");
     const provider = new ScriptedProvider([
       artifact,
-      blindResult("character_shen_lan"),
+      { ...blindResult(artifact), culpritId: "character_shen_lan" },
       {
         evidence: [
           {
@@ -331,7 +752,7 @@ describe("case generation graph", () => {
           },
         ],
       },
-      blindResult(artifact.culpritId),
+      blindResult(artifact),
     ]);
     const graph = createCaseGenerationGraph(provider);
     const result = await graph.invoke(initialState("seed-three"));
@@ -389,7 +810,7 @@ describe("case generation graph", () => {
   });
 
   it("requires the blind detective to cite evidence for culprit, motive, and method", () => {
-    const result = blindResult(tutorialCase.culpritId);
+    const result = blindResult(tutorialCase);
     expect(blindSolveSupportsConclusion(tutorialCase, result)).toBe(true);
     expect(
       blindSolveSupportsConclusion(tutorialCase, {
@@ -480,6 +901,31 @@ function structuredOutputValidationError(input: unknown) {
   );
 }
 
+function structuredRepairOutputValidationError(input: unknown) {
+  const parsed = caseArtifactRepairPatchSchema.safeParse(input);
+  if (parsed.success) {
+    throw new Error("Expected malformed repair patch to fail schema validation");
+  }
+  return Object.assign(
+    new Error(
+      'DeepSeek JSON for structured output "case_artifact_repair_patch" failed schema validation',
+    ),
+    {
+      name: "StructuredOutputValidationError",
+      schemaName: "case_artifact_repair_patch",
+      input,
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path,
+        message: issue.message,
+        received: formatReceivedValue(readPath(input, issue.path)),
+      })),
+      model: "mock-deepseek-pro",
+      usage: { inputTokens: 800, cachedInputTokens: 0, outputTokens: 120 },
+      rawResponse: { content: JSON.stringify(input) },
+    },
+  );
+}
+
 function readPath(input: unknown, path: ReadonlyArray<PropertyKey>) {
   let current = input;
   for (const segment of path) {
@@ -506,17 +952,13 @@ function formatReceivedValue(value: unknown) {
 }
 
 function generatedTutorial(id: string, seed: string) {
-  return parseCaseArtifact({ ...tutorialCase, id, seed });
+  return makeGeneratedCaseArtifact(id, seed);
 }
 
-function blindResult(culpritId: string) {
+function blindResult(caseArtifact: CaseArtifact) {
   return {
-    culpritId,
-    evidenceIds: [
-      "evidence_transfer_ledger",
-      "evidence_smart_lock_log",
-      "evidence_brass_bookend",
-    ],
+    culpritId: caseArtifact.culpritId,
+    evidenceIds: caseArtifact.evidence.map((evidence) => evidence.id),
     reasoning: "账目证明动机，门禁记录证明机会，黄铜书挡与茶水检验共同证明作案手法。",
   };
 }

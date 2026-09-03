@@ -48,6 +48,38 @@ export class StructuredOutputValidationError extends Error {
   }
 }
 
+/** 模型调用已计费且已有原始响应，但响应中找不到可解析的 JSON 对象。 */
+export class StructuredOutputParseError extends Error {
+  constructor(
+    readonly schemaName: string,
+    readonly model: string,
+    readonly usage: ModelUsage,
+    readonly rawResponse: Record<string, unknown>,
+    readonly diagnostic: string,
+  ) {
+    super(
+      `DeepSeek returned no parseable JSON for structured output "${schemaName}" (${diagnostic})`,
+    );
+    this.name = "StructuredOutputParseError";
+  }
+}
+
+export function isStructuredOutputParseError(
+  error: unknown,
+): error is StructuredOutputParseError {
+  if (error instanceof StructuredOutputParseError) return true;
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as Partial<StructuredOutputParseError>;
+  return (
+    candidate.name === "StructuredOutputParseError" &&
+    typeof candidate.schemaName === "string" &&
+    typeof candidate.model === "string" &&
+    isModelUsage(candidate.usage) &&
+    isRecord(candidate.rawResponse) &&
+    typeof candidate.diagnostic === "string"
+  );
+}
+
 export function isStructuredOutputValidationError(
   error: unknown,
 ): error is StructuredOutputValidationError {

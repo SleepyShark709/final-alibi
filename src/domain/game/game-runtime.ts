@@ -1,5 +1,9 @@
 import type { CaseArtifact } from "@/domain/case/case-artifact";
-import { findReachableEvidenceIds } from "@/domain/case/evidence-reachability";
+import { solveCaseWithEvidenceIds } from "@/domain/case/case-solver";
+import {
+  findInitiallyDiscoverableSceneEvidenceIds,
+  findReachableEvidenceIds,
+} from "@/domain/case/evidence-reachability";
 
 /**
  * 纯确定性游戏状态机。这里不访问数据库、不调用模型：每个命令把冻结的案件账本和
@@ -1614,6 +1618,10 @@ export function getPlayerCaseView(
   const hasCompleteEvidenceChain = caseArtifact.solution.requiredEvidenceIds.every(
     (evidenceId) => session.discoveredEvidenceIds.includes(evidenceId),
   );
+  const hasConfirmedConclusion =
+    hasCompleteEvidenceChain &&
+    solveCaseWithEvidenceIds(caseArtifact, session.discoveredEvidenceIds).status ===
+      "unique";
   const confrontationReady = hasCompleteConfrontationDossier(
     caseArtifact,
     session,
@@ -1682,12 +1690,9 @@ export function getPlayerCaseView(
           description: object.description,
         })),
       })),
-    evidence: discoveredEvidence.map((evidence) => ({
-        id: evidence.id,
-        name: evidence.name,
-        description: evidence.description,
-        kind: evidence.kind,
-      })),
+    evidence: discoveredEvidence.map((evidence) =>
+      playerFacingEvidence(caseArtifact, evidence, hasConfirmedConclusion),
+    ),
     claims: caseArtifact.claims.filter((claim) =>
       session.discoveredClaimIds.includes(claim.id),
     ),
@@ -1697,11 +1702,17 @@ export function getPlayerCaseView(
       .map((fact) => ({
         id: fact.id,
         type: fact.type,
-        statement: fact.statement,
+        statement: playerFacingFactStatement(
+          caseArtifact,
+          fact,
+          hasConfirmedConclusion,
+        ),
         sourceEvidenceNames: unique(
           discoveredEvidence
             .filter((evidence) => evidence.supportsFactIds.includes(fact.id))
-            .map((evidence) => evidence.name),
+            .map((evidence) =>
+              playerFacingEvidence(caseArtifact, evidence, hasConfirmedConclusion).name,
+            ),
         ),
       })),
     reportOptions: {
@@ -1710,11 +1721,25 @@ export function getPlayerCaseView(
         .map(publicCharacter),
       motiveFacts: caseArtifact.facts
         .filter((fact) => fact.type === "motive" && discoveredFactIds.has(fact.id))
-        .map((fact) => ({ id: fact.id, statement: fact.statement })),
+        .map((fact) => ({
+          id: fact.id,
+          statement: playerFacingFactStatement(
+            caseArtifact,
+            fact,
+            hasConfirmedConclusion,
+          ),
+        })),
       methodFacts: caseArtifact.facts
         .filter((fact) => fact.type === "method" && discoveredFactIds.has(fact.id))
-        .map((fact) => ({ id: fact.id, statement: fact.statement })),
-      timelineEvents: hasCompleteEvidenceChain
+        .map((fact) => ({
+          id: fact.id,
+          statement: playerFacingFactStatement(
+            caseArtifact,
+            fact,
+            hasConfirmedConclusion,
+          ),
+        })),
+      timelineEvents: hasConfirmedConclusion
         ? caseArtifact.timeline.map((event) => ({
             id: event.id,
             timestamp: event.timestamp,
@@ -1725,6 +1750,54 @@ export function getPlayerCaseView(
       hasCompleteConfrontationDossier: confrontationReady,
     },
   };
+}
+
+function playerFacingEvidence(
+  caseArtifact: CaseArtifact,
+  evidence: CaseArtifact["evidence"][number],
+  hasConfirmedConclusion: boolean,
+) {
+  const shouldRedact =
+    !hasConfirmedConclusion &&
+    findInitiallyDiscoverableSceneEvidenceIds(caseArtifact).has(evidence.id);
+  return {
+    id: evidence.id,
+    name: shouldRedact
+      ? redactUnconfirmedLead(caseArtifact, evidence.name)
+      : evidence.name,
+    description: shouldRedact
+      ? redactUnconfirmedLead(caseArtifact, evidence.description)
+      : evidence.description,
+    kind: evidence.kind,
+  };
+}
+
+function playerFacingFactStatement(
+  caseArtifact: CaseArtifact,
+  fact: CaseArtifact["facts"][number],
+  hasConfirmedConclusion: boolean,
+) {
+  if (hasConfirmedConclusion) return fact.statement;
+  const unconfirmedStatements: Partial<Record<CaseArtifact["facts"][number]["type"], string>> = {
+    identity: "发现了需要交叉核验的身份关联线索，尚待交叉核验。",
+    motive: "发现了可能的作案动机线索，尚待交叉核验。",
+    method: "发现了可能的作案手法线索，尚待交叉核验。",
+    opportunity: "发现了需要核验的行动轨迹线索，尚待交叉核验。",
+    alibi: "发现了一份仍待核验的不在场线索，尚待交叉核验。",
+  };
+  return unconfirmedStatements[fact.type] ?? redactUnconfirmedLead(caseArtifact, fact.statement);
+}
+
+function redactUnconfirmedLead(caseArtifact: CaseArtifact, text: string) {
+  let redacted = text;
+  const suspectNames = caseArtifact.characters
+    .filter((character) => character.roleTier === "suspect")
+    .map((character) => character.name)
+    .sort((left, right) => right.length - left.length);
+  for (const suspectName of suspectNames) {
+    redacted = redacted.replaceAll(suspectName, "某位嫌疑人");
+  }
+  return redacted.replace(/真凶|凶手|作案者|杀人者/gu, "相关人员");
 }
 
 export function getCaseReview(

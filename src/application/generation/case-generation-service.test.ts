@@ -10,8 +10,7 @@ import type {
   StructuredModelRequest,
   StructuredModelResult,
 } from "@/ai/model-provider";
-import { tutorialCase } from "@/content/tutorial/tutorial-case";
-import { parseCaseArtifact } from "@/domain/case/case-artifact";
+import { makeGeneratedCaseArtifact } from "@/ai/generation/testing/make-generated-case-artifact";
 import {
   createDatabase,
   type DatabaseHandle,
@@ -44,20 +43,15 @@ describe("CaseGenerationService", () => {
 
   it("runs a queued generation job and freezes the exact artifact for replay", async () => {
     const identity = await repository.createAnonymousIdentity();
-    const artifact = parseCaseArtifact({
-      ...tutorialCase,
-      id: "case_service_generated",
-      seed: "service-seed",
-    });
+    const artifact = makeGeneratedCaseArtifact(
+      "case_service_generated",
+      "service-seed",
+    );
     const provider = new ScriptedProvider([
       artifact,
       {
         culpritId: artifact.culpritId,
-        evidenceIds: [
-          "evidence_transfer_ledger",
-          "evidence_smart_lock_log",
-          "evidence_brass_bookend",
-        ],
+        evidenceIds: artifact.evidence.map((evidence) => evidence.id),
         reasoning: "账目锁定动机，门禁记录与凶器痕迹共同建立机会和作案手法，排除其他嫌疑人。",
       },
     ]);
@@ -137,6 +131,68 @@ describe("CaseGenerationService", () => {
           }),
         }),
       );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("requeues a structurally rejected case for a fresh full draft", async () => {
+    const identity = await repository.createAnonymousIdentity();
+    const valid = makeGeneratedCaseArtifact(
+      "case_service_retried",
+      "service-retry-seed",
+    );
+    const invalid = structuredClone(valid);
+    invalid.scenes = invalid.scenes.slice(0, 2);
+    const provider = new ScriptedProvider([
+      invalid,
+      { title: valid.title },
+      { title: valid.title },
+      { title: valid.title },
+      valid,
+      {
+        culpritId: valid.culpritId,
+        evidenceIds: valid.evidence.map((evidence) => evidence.id),
+        reasoning: "账目、门禁与凶器痕迹共同形成完整的动机、机会和手法闭环。",
+      },
+    ]);
+    const service = new CaseGenerationService(
+      repository,
+      provider,
+      new MemorySaver(),
+    );
+    const queued = await service.enqueue(identity.playerId, {
+      seed: "service-retry-seed",
+      theme: "雨夜宅邸",
+      difficulty: "standard",
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const first = await processNextCaseGenerationJob(repository, service);
+      const afterFirst = await repository.getJob(identity.playerId, queued.jobId);
+      const second = await processNextCaseGenerationJob(repository, service);
+      const completed = await repository.getJob(identity.playerId, queued.jobId);
+
+      expect({
+        first,
+        firstStatus: afterFirst.status,
+        firstAttempts: afterFirst.attempts,
+        firstError: afterFirst.error,
+        second,
+        completedStatus: completed.status,
+        completedAttempts: completed.attempts,
+        caseId: completed.result?.caseId,
+      }).toEqual({
+        first: { jobId: queued.jobId, status: "retrying" },
+        firstStatus: "queued",
+        firstAttempts: 1,
+        firstError: expect.stringContaining("CaseGenerationRejectedError"),
+        second: { jobId: queued.jobId, status: "succeeded" },
+        completedStatus: "succeeded",
+        completedAttempts: 2,
+        caseId: "case_service_retried",
+      });
     } finally {
       errorLog.mockRestore();
     }

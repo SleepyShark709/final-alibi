@@ -5,8 +5,7 @@ import type {
   StructuredModelRequest,
   StructuredModelResult,
 } from "@/ai/model-provider";
-import { tutorialCase } from "@/content/tutorial/tutorial-case";
-import { parseCaseArtifact } from "@/domain/case/case-artifact";
+import type { CaseArtifact } from "@/domain/case/case-artifact";
 import { validatePublishableCaseArtifact } from "@/domain/case/case-validator";
 import {
   getPlayerCaseView,
@@ -18,6 +17,7 @@ import {
 } from "@/domain/game/game-runtime";
 
 import { createCaseGenerationGraph } from "./case-generation-graph";
+import { makeGeneratedCaseArtifact } from "./testing/make-generated-case-artifact";
 
 describe("generated case release gate stress", () => {
   it("publishes and completes ten consecutive constrained cases", async () => {
@@ -25,22 +25,17 @@ describe("generated case release gate stress", () => {
 
     for (let index = 1; index <= 10; index += 1) {
       const seed = `stress-seed-${index}`;
-      const artifact = parseCaseArtifact({
-        ...tutorialCase,
-        id: `case_stress_${index}`,
+      const artifact = makeGeneratedCaseArtifact(
+        `case_stress_${index}`,
         seed,
-        title: `雨夜书房 · 压测卷 ${index}`,
-      });
+        `雨夜书房 · 压测卷 ${index}`,
+      );
       const graph = createCaseGenerationGraph(
         new StressProvider([
           artifact,
           {
             culpritId: artifact.culpritId,
-            evidenceIds: [
-              "evidence_transfer_ledger",
-              "evidence_smart_lock_log",
-              "evidence_brass_bookend",
-            ],
+            evidenceIds: artifact.evidence.map((evidence) => evidence.id),
             reasoning:
               "账目建立动机，门禁与目击建立机会，书挡纤维及茶中成分共同还原作案手法。",
           },
@@ -106,18 +101,15 @@ class StressProvider implements StructuredModelProvider {
   }
 }
 
-function discoverRequiredEvidence(
-  caseArtifact: typeof tutorialCase,
-  initial: GameSession,
-) {
+function discoverRequiredEvidence(caseArtifact: CaseArtifact, initial: GameSession) {
   const actions = [
     ["tea", "化验茶水", "scene_study"],
     ["bookend", "检查黄铜书挡", "scene_study"],
     ["ledger", "翻找书桌抽屉", "scene_study"],
     ["paint", "核实沈岚的不在场证明", undefined],
     ["memo", "检查碎纸篓", "scene_study"],
-    ["elevator", "查询货梯日志", "scene_security_room"],
     ["lock", "恢复门禁日志", "scene_security_room"],
+    ["camera", "逐帧查看监控", "scene_security_room"],
   ] as const;
   const investigated = actions.reduce(
     (session, [suffix, text, sceneId]) =>
@@ -141,15 +133,15 @@ function discoverRequiredEvidence(
     },
   });
   return recordDialogueTurn(caseArtifact, afterHousekeeper.session, {
-    commandId: `stress_${initial.id}_ask_chen`,
-    characterId: "character_chen_mo",
-    playerText: "询问陈默案发时在哪里",
+    commandId: `stress_${initial.id}_ask_han`,
+    characterId: "character_han_zhuo",
+    playerText: "货梯记录显示了什么",
     response: {
-      utterance: "我在诊所做医学直播，后台回放和观众互动记录都在。",
-      demeanor: "guarded",
-      disclosedClaimIds: ["claim_chen_alibi"],
-      memorySummary: "陈默提供了案发时医学直播的回放链接。",
-      stateDelta: { trust: 1, pressure: 2, alertness: 1 },
+      utterance: "货梯日志显示赵衡在案发时只往返一楼和地下仓库，没有到过二楼。",
+      demeanor: "cooperative",
+      disclosedClaimIds: ["claim_han_logs"],
+      memorySummary: "韩卓核实了赵衡的货梯行程。",
+      stateDelta: { trust: 2, pressure: 1, alertness: 0 },
     },
   }).session;
 }
