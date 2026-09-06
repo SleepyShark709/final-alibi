@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { tutorialCase } from "@/content/tutorial/tutorial-case";
 
 import {
+  buildDeterministicDialogueShortcut,
   getCaseReview,
   getPlayerCaseView,
   performInvestigation,
@@ -48,7 +49,12 @@ describe("deterministic game runtime", () => {
   });
 
   it("discovers evidence and applies progressive unlock rules", () => {
-    const result = performInvestigation(tutorialCase, newSession(), {
+    const afterLedger = performInvestigation(tutorialCase, newSession(), {
+      commandId: "command_find_ledger_before_memo",
+      text: "翻找书桌抽屉",
+      sceneId: "scene_study",
+    }).session;
+    const result = performInvestigation(tutorialCase, afterLedger, {
       commandId: "command_find_memo",
       text: "我想检查碎纸篓",
       sceneId: "scene_study",
@@ -61,6 +67,39 @@ describe("deterministic game runtime", () => {
       unlockedSceneIds: ["scene_security_room"],
       unlockedCharacterIds: ["character_han_zhuo"],
     });
+  });
+
+  it("does not expose the author's exact crime time through the public case metadata", () => {
+    const caseArtifact = structuredClone(tutorialCase);
+    const session = newSession();
+    const before = getPlayerCaseView(caseArtifact, session);
+    caseArtifact.setting.occurredAt = "2026-09-05T22:05:00+08:00";
+
+    const resumed = getPlayerCaseView(caseArtifact, session);
+    expect(resumed.case).toEqual(before.case);
+    expect(resumed.case.setting).toEqual({
+      era: caseArtifact.setting.era,
+      place: caseArtifact.setting.place,
+    });
+    expect(caseArtifact.setting.occurredAt).toBe("2026-09-05T22:05:00+08:00");
+  });
+
+  it("filters hidden financial conflict from a legacy public profile while retaining knowledge and discoverable evidence", () => {
+    const caseArtifact = structuredClone(tutorialCase);
+    const character = caseArtifact.characters.find((candidate) => candidate.id === "character_li_wenzhou")!;
+    character.publicProfile = "基金会财务主管。近期与顾明远存在经济纠纷。";
+    const originalKnowledge = structuredClone(character.knowledge);
+    const originalEvidence = structuredClone(caseArtifact.evidence);
+    const session = startGame(caseArtifact, { sessionId: "legacy_profile" });
+
+    expect(getPlayerCaseView(caseArtifact, session).characters.find((candidate) => candidate.id === character.id)?.publicProfile).toBe("基金会财务主管。");
+    const investigated = performInvestigation(caseArtifact, session, {
+      commandId: "find_financial_evidence", sceneId: "scene_study", text: "翻找书桌抽屉",
+    });
+    expect(investigated.session.discoveredEvidenceIds).toContain("evidence_transfer_ledger");
+    expect(character.publicProfile).toContain("经济纠纷");
+    expect(character.knowledge).toEqual(originalKnowledge);
+    expect(caseArtifact.evidence).toEqual(originalEvidence);
   });
 
   it("does not reveal evidence from a locked scene", () => {
@@ -91,8 +130,9 @@ describe("deterministic game runtime", () => {
 
   it("treats a repeated command id as idempotent", () => {
     const command = {
-      commandId: "command_query_paint",
-      text: "核实沈岚的不在场证明",
+      commandId: "command_find_ledger_once",
+      text: "翻找书桌抽屉",
+      sceneId: "scene_study",
     };
     const first = performInvestigation(tutorialCase, newSession(), command);
     const second = performInvestigation(tutorialCase, first.session, command);
@@ -409,16 +449,22 @@ describe("deterministic game runtime", () => {
       sceneId: "scene_study",
     }).session;
     const afterLedgerView = getPlayerCaseView(tutorialCase, afterLedger);
+    const afterMemo = performInvestigation(tutorialCase, afterLedger, {
+      commandId: "command_deduction_memo",
+      text: "检查碎纸篓",
+      sceneId: "scene_study",
+    }).session;
 
     expect(
       beforeLedger.deductions.some(
         (fact) => fact.id === tutorialCase.solution.motiveFactId,
       ),
     ).toBe(false);
-    expect(afterLedgerView.deductions).toContainEqual(
+    expect(afterLedgerView.deductions.some((fact) => fact.id === tutorialCase.solution.motiveFactId)).toBe(false);
+    expect(getPlayerCaseView(tutorialCase, afterMemo).deductions).toContainEqual(
       expect.objectContaining({
         id: tutorialCase.solution.motiveFactId,
-        sourceEvidenceNames: expect.arrayContaining(["异常转账账簿"]),
+        sourceEvidenceNames: expect.arrayContaining(["被撕毁的审计备忘录"]),
       }),
     );
   });
@@ -445,14 +491,9 @@ describe("deterministic game runtime", () => {
 
     expect(earlyDeductions).not.toContain("李闻舟");
     expect(earlyDeductions).not.toContain("凶手先在茶中加入镇静剂");
-    expect(earlyDeductions).toContain("尚待交叉核验");
+    expect(earlyView.deductions).toContainEqual(expect.objectContaining({ id: "fact_fund_diversion" }));
     expect(earlyEvidence).not.toContain("李闻舟");
-    expect(earlyView.reportOptions.motiveFacts).toEqual([
-      {
-        id: "fact_motive_embezzlement",
-        statement: "发现了可能的作案动机线索，尚待交叉核验。",
-      },
-    ]);
+    expect(earlyView.reportOptions.motiveFacts).toEqual([]);
 
     const completedView = getPlayerCaseView(
       tutorialCase,
@@ -462,7 +503,7 @@ describe("deterministic game runtime", () => {
       completedView.deductions.find(
         (fact) => fact.id === tutorialCase.solution.methodFactId,
       )?.statement,
-    ).toBe("凶手先在茶中加入镇静剂，再使用黄铜书挡实施致命袭击。");
+    ).toBe(tutorialCase.facts.find((fact) => fact.id === tutorialCase.solution.methodFactId)!.statement);
   });
 
   it("rejects a character disclosing another person's claim", () => {
@@ -505,6 +546,7 @@ describe("deterministic game runtime", () => {
     });
     const review = getCaseReview(tutorialCase, submitted.session);
 
+    expect(review?.timeline).toEqual(tutorialCase.timeline);
     expect({
       status: submitted.outcome.status,
       verdict: submitted.outcome.report.verdict,
@@ -622,30 +664,30 @@ describe("deterministic game runtime", () => {
   });
 
   it("treats a correct early accusation with partial evidence as a solved case", () => {
-    const afterTea = performInvestigation(tutorialCase, newSession(), {
-      commandId: "command_early_tea",
-      text: "化验茶水",
+    const afterWatch = performInvestigation(tutorialCase, newSession(), {
+      commandId: "command_early_watch",
+      text: "检查腕表",
       sceneId: "scene_study",
     }).session;
-    const afterBookend = performInvestigation(tutorialCase, afterTea, {
-      commandId: "command_early_bookend",
-      text: "检查黄铜书挡",
+    const afterLedger = performInvestigation(tutorialCase, afterWatch, {
+      commandId: "command_early_ledger",
+      text: "翻找书桌抽屉",
       sceneId: "scene_study",
     }).session;
 
-    const submitted = submitCaseReport(tutorialCase, afterBookend, {
+    const submitted = submitCaseReport(tutorialCase, afterLedger, {
       commandId: "command_submit_early_report",
       culpritId: tutorialCase.solution.culpritId,
       motiveFactId: "",
       methodFactId: "",
-      evidenceIds: ["evidence_teacup_residue", "evidence_brass_bookend"],
+      evidenceIds: ["evidence_broken_watch", "evidence_transfer_ledger"],
       timelineEventIds: [],
-      reasoning: "茶中残留与带有纤维的书挡已经足以让我锁定李闻舟。",
+      reasoning: "我根据时间材料与异常资金流向提前指认李闻舟，尚未完成交叉核验。",
     });
 
     expect(submitted.outcome.report).toMatchObject({
       verdict: "solved",
-      score: 45,
+      score: 44,
       correct: {
         culprit: true,
         motive: false,
@@ -658,24 +700,24 @@ describe("deterministic game runtime", () => {
   });
 
   it("fully declassifies missed evidence and its acquisition route after closure", () => {
-    const afterTea = performInvestigation(tutorialCase, newSession(), {
-      commandId: "command_debrief_tea",
-      text: "化验茶水",
+    const afterWatch = performInvestigation(tutorialCase, newSession(), {
+      commandId: "command_debrief_watch",
+      text: "检查腕表",
       sceneId: "scene_study",
     }).session;
-    const afterBookend = performInvestigation(tutorialCase, afterTea, {
-      commandId: "command_debrief_bookend",
-      text: "检查黄铜书挡",
+    const afterLedger = performInvestigation(tutorialCase, afterWatch, {
+      commandId: "command_debrief_ledger",
+      text: "翻找书桌抽屉",
       sceneId: "scene_study",
     }).session;
-    const submitted = submitCaseReport(tutorialCase, afterBookend, {
+    const submitted = submitCaseReport(tutorialCase, afterLedger, {
       commandId: "command_submit_debrief",
       culpritId: tutorialCase.solution.culpritId,
       motiveFactId: "",
       methodFactId: "",
-      evidenceIds: ["evidence_teacup_residue", "evidence_brass_bookend"],
+      evidenceIds: ["evidence_broken_watch", "evidence_transfer_ledger"],
       timelineEventIds: [],
-      reasoning: "两条物证都指向李闻舟，但我决定提前提交结论。",
+      reasoning: "只取得了时间材料和资金记录，我决定提前指认李闻舟。",
     });
     const review = getCaseReview(tutorialCase, submitted.session);
     const housekeeperTestimony = review?.evidence.find(
@@ -780,31 +822,31 @@ describe("deterministic game runtime", () => {
   });
 
   it("keeps a wrong early accusation permanently closed", () => {
-    const afterTea = performInvestigation(tutorialCase, newSession(), {
-      commandId: "command_wrong_early_tea",
-      text: "化验茶水",
+    const afterWatch = performInvestigation(tutorialCase, newSession(), {
+      commandId: "command_wrong_early_watch",
+      text: "检查腕表",
       sceneId: "scene_study",
     }).session;
-    const afterBookend = performInvestigation(tutorialCase, afterTea, {
-      commandId: "command_wrong_early_bookend",
-      text: "检查黄铜书挡",
+    const afterLedger = performInvestigation(tutorialCase, afterWatch, {
+      commandId: "command_wrong_early_ledger",
+      text: "翻找书桌抽屉",
       sceneId: "scene_study",
     }).session;
-    const wrong = submitCaseReport(tutorialCase, afterBookend, {
+    const wrong = submitCaseReport(tutorialCase, afterLedger, {
       commandId: "command_submit_wrong_early_report",
       culpritId: "character_shen_lan",
       motiveFactId: "",
       methodFactId: "",
-      evidenceIds: ["evidence_teacup_residue", "evidence_brass_bookend"],
+      evidenceIds: ["evidence_broken_watch", "evidence_transfer_ledger"],
       timelineEventIds: [],
-      reasoning: "茶中残留与书挡痕迹让我错误地怀疑了沈岚。",
+      reasoning: "仅凭时间材料与资金记录，我错误地指认了沈岚。",
     });
     const correction = submitCaseReport(tutorialCase, wrong.session, {
       commandId: "command_submit_late_correction",
       culpritId: tutorialCase.solution.culpritId,
       motiveFactId: "",
       methodFactId: "",
-      evidenceIds: ["evidence_teacup_residue", "evidence_brass_bookend"],
+      evidenceIds: ["evidence_broken_watch", "evidence_transfer_ledger"],
       timelineEventIds: [],
       reasoning: "我想在结案后更正为李闻舟。",
     });
@@ -826,18 +868,19 @@ describe("deterministic game runtime", () => {
       text: "检查腕表",
       sceneId: "scene_study",
     }).session;
-    const afterPaintRecord = performInvestigation(tutorialCase, afterWatch, {
-      commandId: "command_guessed_ids_paint",
-      text: "核实沈岚的不在场证明",
+    const afterLedger = performInvestigation(tutorialCase, afterWatch, {
+      commandId: "command_guessed_ids_ledger",
+      text: "翻找书桌抽屉",
+      sceneId: "scene_study",
     }).session;
-    const submitted = submitCaseReport(tutorialCase, afterPaintRecord, {
+    const submitted = submitCaseReport(tutorialCase, afterLedger, {
       commandId: "command_submit_guessed_ids",
       culpritId: tutorialCase.solution.culpritId,
       motiveFactId: tutorialCase.solution.motiveFactId,
       methodFactId: tutorialCase.solution.methodFactId,
       evidenceIds: [
         "evidence_broken_watch",
-        "evidence_paint_curing_record",
+        "evidence_transfer_ledger",
         "evidence_unknown",
       ],
       timelineEventIds: [
@@ -848,7 +891,7 @@ describe("deterministic game runtime", () => {
     });
 
     expect(submitted.outcome.report).toMatchObject({
-      score: 43,
+      score: 44,
       correct: {
         culprit: true,
         motive: false,
@@ -856,11 +899,11 @@ describe("deterministic game runtime", () => {
         evidence: false,
         timeline: false,
       },
-      breakdown: { culprit: 40, motive: 0, method: 0, evidence: 3, timeline: 0 },
+      breakdown: { culprit: 40, motive: 0, method: 0, evidence: 4, timeline: 0 },
     });
   });
 
-  it("redacts character identities from pre-submission timeline choices", () => {
+  it("keeps private identities and exact author times out of pre-submission timeline choices", () => {
     const view = getPlayerCaseView(
       tutorialCase,
       discoverRequiredEvidence(newSession()),
@@ -870,6 +913,16 @@ describe("deterministic game runtime", () => {
     expect(view.reportOptions.hasCompleteEvidenceChain).toBe(true);
     expect(timeline).not.toContain("李闻舟");
     expect(timeline).toContain("某位嫌疑人");
+    expect(timeline).not.toContain("timestamp");
+    for (const event of tutorialCase.timeline) {
+      expect(timeline).not.toContain(event.timestamp);
+    }
+    const changedAuthorTimes = structuredClone(tutorialCase);
+    changedAuthorTimes.timeline.forEach((event, index) => {
+      event.timestamp = `2026-08-30T21:${String(index + 20).padStart(2, "0")}:00+08:00`;
+    });
+    expect(getPlayerCaseView(changedAuthorTimes, discoverRequiredEvidence(newSession())).reportOptions)
+      .toEqual(view.reportOptions);
   });
 });
 
@@ -881,49 +934,31 @@ function newSession() {
 }
 
 function discoverRequiredEvidence(initial: GameSession) {
-  const actions = [
-    ["tea", "化验茶水", "scene_study"],
-    ["bookend", "检查黄铜书挡", "scene_study"],
-    ["ledger", "翻找书桌抽屉", "scene_study"],
-    ["paint", "核实沈岚的不在场证明", undefined],
-    ["memo", "检查碎纸篓", "scene_study"],
-    ["elevator", "查询货梯日志", "scene_security_room"],
-    ["lock", "恢复门禁日志", "scene_security_room"],
-  ] as const;
-
-  const investigated = actions.reduce(
-    (session, [suffix, text, sceneId]) =>
-      performInvestigation(tutorialCase, session, {
-        commandId: `command_${suffix}`,
-        text,
-        sceneId,
-      }).session,
-    initial,
-  );
-  const afterHousekeeper = recordDialogueTurn(tutorialCase, investigated, {
-    commandId: "command_ask_housekeeper_for_chain",
-    characterId: "character_luo_fang",
-    playerText: "询问罗芳谁送了茶",
-    response: {
-      utterance: "李闻舟主动接过茶盘，说要替我送上二楼。",
-      demeanor: "cooperative",
-      disclosedClaimIds: ["claim_luo_tea"],
-      memorySummary: "罗芳确认了茶盘被李闻舟接走的经过。",
-      stateDelta: { trust: 4, pressure: 1, alertness: 0 },
-    },
-  });
-  return recordDialogueTurn(tutorialCase, afterHousekeeper.session, {
-    commandId: "command_ask_chen_for_chain",
-    characterId: "character_chen_mo",
-    playerText: "询问陈默案发时在哪里",
-    response: {
-      utterance: "我在诊所做医学直播，后台回放和观众互动记录都在。",
-      demeanor: "guarded",
-      disclosedClaimIds: ["claim_chen_alibi"],
-      memorySummary: "陈默提供了案发时医学直播的回放链接。",
-      stateDelta: { trust: 1, pressure: 2, alertness: 1 },
-    },
-  }).session;
+  let session = initial;
+  const route = [
+    "evidence_broken_watch", "evidence_housekeeper_testimony", "evidence_teacup_residue",
+    "evidence_brass_bookend", "evidence_transfer_ledger", "evidence_torn_audit_memo",
+    "evidence_smart_lock_log", "evidence_camera_reflection", "evidence_paint_curing_record",
+    "evidence_elevator_log", "evidence_livestream_record",
+  ];
+  for (const id of route) {
+    const { discovery } = tutorialCase.evidence.find((evidence) => evidence.id === id)!;
+    if (discovery.method === "interview") {
+      const playerText = discovery.dialogueAliases![0]!;
+      const response = buildDeterministicDialogueShortcut(tutorialCase, session, discovery.characterId!, playerText);
+      expect(response, id).not.toBeNull();
+      session = recordDialogueTurn(tutorialCase, session, {
+        commandId: `command_${id}`, characterId: discovery.characterId!, playerText, response: response!,
+      }).session;
+    } else {
+      session = performInvestigation(tutorialCase, session, {
+        commandId: `command_${id}`, text: discovery.actionAliases[0]!,
+        sceneId: discovery.sceneId, objectId: discovery.objectId,
+      }).session;
+    }
+    expect(session.discoveredEvidenceIds, id).toContain(id);
+  }
+  return session;
 }
 
 function discoverAllEvidence(initial: GameSession): GameSession {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyCaseArtifactRepairPatch,
+  caseArtifactRepairPatchSchema,
   parseCaseArtifact,
 } from "./case-artifact";
 
@@ -167,6 +168,20 @@ describe("parseCaseArtifact", () => {
     ]).toEqual([true, true, true]);
   });
 
+  it("changes a scene's unlock state without replacing its public text or objects", () => {
+    const artifact = parseCaseArtifact(minimalCaseArtifact);
+    const patch = caseArtifactRepairPatchSchema.parse({ scenes: [{ id: "scene_study", initiallyUnlocked: false }] });
+    const repaired = applyCaseArtifactRepairPatch(artifact, patch);
+    expect(repaired.scenes[0]).toEqual({ ...artifact.scenes[0], initiallyUnlocked: false });
+    expect(repaired.evidence).toEqual(artifact.evidence);
+  });
+
+  it("still rejects an incomplete new scene when applying a partial scene patch", () => {
+    const artifact = parseCaseArtifact(minimalCaseArtifact);
+    const patch = caseArtifactRepairPatchSchema.parse({ scenes: [{ id: "scene_incomplete_new", initiallyUnlocked: false }] });
+    expect(() => applyCaseArtifactRepairPatch(artifact, patch)).toThrow();
+  });
+
   it("allows a compact repair to remove an unreferenced supporting character", () => {
     const parsed = parseCaseArtifact({
       ...minimalCaseArtifact,
@@ -203,6 +218,54 @@ describe("parseCaseArtifact", () => {
       applyCaseArtifactRepairPatch(parsed, {
         removeCharacterIds: ["character_suspect"],
       }),
-    ).toThrow("can only remove existing supporting characters");
+    ).toThrow("repair patches cannot remove missing characters, the victim or the culprit");
   });
+
+  it("allows a compact repair to remove an extra non-culprit suspect", () => {
+    const parsed = parseCaseArtifact({
+      ...minimalCaseArtifact,
+      characters: [...minimalCaseArtifact.characters, { ...minimalCaseArtifact.characters[1], id: "character_extra_suspect", name: "多余嫌疑人" }],
+    });
+    const repaired = applyCaseArtifactRepairPatch(parsed, { removeCharacterIds: ["character_extra_suspect"] });
+    expect(repaired.characters.map((character) => character.id)).toEqual(["character_victim", "character_suspect"]);
+  });
+
+  it.each(["character_victim", "character_suspect", "character_missing"])("keeps protected or unknown character %s out of removal patches", (characterId) => {
+    expect(() => applyCaseArtifactRepairPatch(parseCaseArtifact(minimalCaseArtifact), { removeCharacterIds: [characterId] })).toThrow("repair patches cannot remove missing characters, the victim or the culprit");
+  });
+
+  it("allows nine character updates while rejecting a tenth", () => {
+    const characters = Array.from({ length: 9 }, (_, index) => ({ id: `character_update_${index}`, publicProfile: "到场参加晚宴。" }));
+    expect(caseArtifactRepairPatchSchema.safeParse({ characters }).success).toBe(true);
+    expect(caseArtifactRepairPatchSchema.safeParse({ characters: [...characters, { id: "character_update_ten" }] }).success).toBe(false);
+  });
+
+  it("deeply merges a discovery prerequisite patch without replacing its route", () => {
+    const parsed = parseCaseArtifact(minimalCaseArtifact);
+    const before = parsed.evidence[0]!.discovery;
+
+    const repaired = applyCaseArtifactRepairPatch(parsed, {
+      evidence: [{
+        id: parsed.evidence[0]!.id,
+        discovery: { prerequisiteEvidenceIds: [parsed.evidence[0]!.id] },
+      }],
+    });
+
+    expect(repaired.evidence[0]!.discovery).toEqual({
+      ...before,
+      prerequisiteEvidenceIds: [parsed.evidence[0]!.id],
+    });
+  });
+
+  it("still requires a complete discovery route when a patch adds new evidence", () => {
+    const parsed = parseCaseArtifact(minimalCaseArtifact);
+
+    expect(() => applyCaseArtifactRepairPatch(parsed, {
+      evidence: [{
+        id: "evidence_new",
+        discovery: { prerequisiteEvidenceIds: [] },
+      }],
+    })).toThrow();
+  });
+
 });

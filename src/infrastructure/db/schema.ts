@@ -9,6 +9,11 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 // 这些表共同保存领域真相、幂等命令和审计；LangGraph 自己的 checkpoint 位于独立 SQLite 文件。
+export const serverSecrets = sqliteTable("server_secrets", {
+  name: text("name").primaryKey(),
+  value: text("value").notNull(),
+});
+
 export const anonymousPlayers = sqliteTable("anonymous_players", {
   id: text("id").primaryKey(),
   accessTokenHash: text("access_token_hash").notNull().unique(),

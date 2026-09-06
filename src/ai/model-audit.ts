@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { z } from "zod";
 
 import {
@@ -117,7 +119,7 @@ function createModelCallAuditFromResponse(
       usage,
       pricingWindowAt(occurredAt),
     ),
-    request: { messages },
+    request: { invocationId: randomUUID(), messages },
     response,
   };
 }

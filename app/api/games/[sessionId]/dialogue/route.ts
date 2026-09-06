@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { requireAccess } from "@/server/access";
 import { jsonError } from "@/server/http-error";
+import { createPlayerProtocol } from "@/server/player-protocol";
 import { requireAnonymousPlayer } from "@/server/player-session";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getServerServices } from "@/server/services";
@@ -31,10 +32,13 @@ export async function POST(
     enforceRateLimit("dialogue:global", { limit: 300, windowMs: 60_000 });
     enforceRateLimit(`dialogue:${playerId}`, { limit: 60, windowMs: 60_000 });
     const { sessionId } = await context.params;
-    const input = dialogueSchema.parse(await request.json());
+    const parsedInput = dialogueSchema.parse(await request.json());
+    const game = await services.repository.loadGame(playerId, sessionId);
+    const protocol = createPlayerProtocol(game.caseArtifact, game.session, await services.repository.getPlayerProtocolKey());
+    const input = protocol.decodeCommand(parsedInput);
     const result = await services.dialogue.talk({ playerId, sessionId, ...input });
     const view = await services.game.getGame(playerId, sessionId);
-    return NextResponse.json({
+    return NextResponse.json(protocol.encode({
       replayed: result.replayed,
       outcome: {
         status: result.outcome.status,
@@ -50,7 +54,7 @@ export async function POST(
         unlockedCharacterIds: result.outcome.unlockedCharacterIds,
       },
       view,
-    });
+    }));
   } catch (error) {
     return jsonError(error);
   }

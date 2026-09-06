@@ -12,6 +12,7 @@ import {
   type CaseGenerationRequest,
 } from "@/ai/generation/generation-schema";
 import type { ModelCallAudit } from "@/ai/model-audit";
+import { EvidenceReviewBatchError } from "@/ai/generation/evidence-review-batches";
 import {
   isStructuredOutputParseError,
   type StructuredModelProvider,
@@ -114,7 +115,12 @@ export class CaseGenerationService {
         modelCalls: [],
       },
       { configurable: { thread_id: generationId } },
-    );
+    ).catch(async (error: unknown) => {
+      if (error instanceof EvidenceReviewBatchError) {
+        await this.persistModelCalls(error.modelCalls, generationId);
+      }
+      throw error;
+    });
 
     if (!result.finalArtifact || !result.blindSolve) {
       await this.persistModelCalls(result.modelCalls, generationId);
@@ -172,8 +178,11 @@ export class CaseGenerationService {
     generationId: string,
     caseId?: string,
   ) {
-    for (const call of calls) {
+    for (const [index, call] of calls.entries()) {
+      const invocationId = typeof call.request.invocationId === "string"
+        ? call.request.invocationId : `legacy:${index}:${JSON.stringify(call)}`;
       const modelRunId = await this.repository.startModelRun({
+        id: `modelrun_${createHash("sha256").update(`${generationId}:${invocationId}`).digest("hex")}`,
         caseId,
         commandId: generationId,
         graphName: "case_generation",

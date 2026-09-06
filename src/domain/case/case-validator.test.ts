@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { makeGeneratedCaseArtifact } from "@/ai/generation/testing/make-generated-case-artifact";
+
+import { solveCase } from "./case-solver";
 import { makeValidCaseArtifact } from "./testing/make-valid-case-artifact";
 import {
   validateCaseArtifact,
@@ -84,34 +87,46 @@ describe("validateCaseArtifact", () => {
     });
   });
 
-  it("requires exactly four core suspects", () => {
-    const caseArtifact = structuredClone(makeValidCaseArtifact());
-    const fifthSuspect = structuredClone(caseArtifact.characters[4]);
-    fifthSuspect.id = "character_suspect_e";
-    fifthSuspect.name = "嫌疑人戊";
-    caseArtifact.characters.push(fifthSuspect);
+  it.each([
+    ["supporting-seed-1", 3],
+    ["supporting-seed-0", 4],
+    ["supporting-seed-3", 5],
+  ])("accepts a solvable case with %s and %i suspects", (seed, count) => {
+    const artifact = makeGeneratedCaseArtifact("case_valid_suspect_count", String(seed));
+    expect(artifact.characters.filter((character) => character.roleTier === "suspect")).toHaveLength(Number(count));
+    expect(validateCaseArtifact(artifact)).toEqual({ valid: true, issues: [] });
+  });
 
-    const report = validateCaseArtifact(caseArtifact);
-
-    expect(report.issues).toContainEqual({
+  it.each([2, 6])("rejects %i suspects outside the supported range", (count) => {
+    const artifact = structuredClone(makeValidCaseArtifact());
+    if (count === 2) {
+      artifact.characters[3]!.roleTier = "referenced";
+      artifact.characters[4]!.roleTier = "referenced";
+    } else {
+      artifact.characters.push(...["e", "f"].map((suffix) => ({ ...structuredClone(artifact.characters[4]!), id: `character_suspect_${suffix}` })));
+    }
+    expect(validateCaseArtifact(artifact).issues).toContainEqual({
       code: "invalid_suspect_count",
       path: "characters",
-      message: "expected exactly 4 suspects but found 5",
+      message: `expected 3 to 5 suspects but found ${count}`,
     });
   });
 
-  it("requires between two and four supporting characters", () => {
-    const caseArtifact = structuredClone(makeValidCaseArtifact());
-    caseArtifact.characters = caseArtifact.characters.filter(
-      (character) => character.id !== "character_witness_b",
-    );
+  it.each([1, 4])("accepts %i supporting characters in the generic validator", (count) => {
+    const artifact = structuredClone(makeValidCaseArtifact());
+    if (count === 1) artifact.characters = artifact.characters.filter((character) => character.id !== "character_witness_b");
+    else artifact.characters.push(...["c", "d"].map((suffix) => ({ ...structuredClone(artifact.characters[5]!), id: `character_witness_${suffix}` })));
+    expect(validateCaseArtifact(artifact)).toEqual({ valid: true, issues: [] });
+  });
 
-    const report = validateCaseArtifact(caseArtifact);
-
-    expect(report.issues).toContainEqual({
+  it.each([0, 5])("rejects %i supporting characters outside the supported range", (count) => {
+    const artifact = structuredClone(makeValidCaseArtifact());
+    if (count === 0) artifact.characters = artifact.characters.filter((character) => character.roleTier !== "witness");
+    else artifact.characters.push(...["c", "d", "e"].map((suffix) => ({ ...structuredClone(artifact.characters[5]!), id: `character_witness_${suffix}` })));
+    expect(validateCaseArtifact(artifact).issues).toContainEqual({
       code: "invalid_supporting_character_count",
       path: "characters",
-      message: "expected 2 to 4 supporting characters but found 1",
+      message: `expected 1 to 4 supporting characters but found ${count}`,
     });
   });
 
@@ -206,8 +221,7 @@ describe("validateCaseArtifact", () => {
     expect(validateCaseArtifact(caseArtifact).issues).toContainEqual({
       code: "insufficient_required_evidence_chain",
       path: "solution.requiredEvidenceIds",
-      message:
-        "the declared required evidence chain must independently identify the culprit, motive, and method",
+      message: expect.stringContaining("missing supportsFactIds:"),
     });
   });
 
@@ -220,6 +234,7 @@ describe("validateCaseArtifact", () => {
       "insufficient_critical_evidence",
       "missing_interview_evidence",
       "insufficient_required_interview_evidence",
+      "unnecessary_interview_evidence",
     ]);
   });
 
@@ -352,6 +367,112 @@ describe("validateCaseArtifact", () => {
       message:
         "expected at least two critical interview evidence items in the required solution chain",
     });
+  });
+
+  it.each(["document", "digital"] as const)("rejects a complete %s chain with two decorative required interviews", async (kind) => {
+    const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
+    const caseArtifact = structuredClone(tutorialCase);
+    const teaService = caseArtifact.evidence.find(
+      (evidence) => evidence.id === "evidence_housekeeper_testimony",
+    )!;
+    caseArtifact.evidence.push({
+      ...structuredClone(teaService),
+      id: "evidence_tea_service_archive",
+      name: "独立封存的茶水交接记录",
+      description: "独立封存的厨房及走廊原片与取样交接单完整记录20:35洗杯、20:36沏茶、20:38李闻舟独自端茶上楼及20:40顾明远接杯喝茶，并标明末次冲洗水、剩余水和茶的样本编号，无须询问罗芳即可送检。",
+      kind,
+      discovery: {
+        method: "query",
+        actionAliases: ["调阅茶水交接记录"],
+        prerequisiteEvidenceIds: ["evidence_broken_watch"],
+      },
+    });
+    const tea = caseArtifact.evidence.find(
+      (evidence) => evidence.id === "evidence_teacup_residue",
+    )!;
+    tea.description = tea.description.replace("罗芳已交付的洗杯、沏茶经过", "独立封存的茶水交接记录");
+    tea.discovery.prerequisiteEvidenceIds = tea.discovery.prerequisiteEvidenceIds.map(
+      (id) => id === teaService.id ? "evidence_tea_service_archive" : id,
+    );
+    const alibi = caseArtifact.evidence.find(
+      (evidence) => evidence.id === "evidence_livestream_record",
+    )!;
+    caseArtifact.evidence.push({
+      ...structuredClone(alibi),
+      id: "evidence_platform_archive",
+      name: "平台提供的直播存档",
+      description: "平台独立调阅的直播存档和观众互动记录连续覆盖案发时间，陈默全程在城南诊所出镜。",
+      kind,
+      discovery: {
+        method: "query",
+        actionAliases: ["调阅平台直播存档"],
+        prerequisiteEvidenceIds: ["evidence_broken_watch"],
+      },
+    });
+
+    expect(validateCaseArtifact(caseArtifact)).toEqual({ valid: true, issues: [] });
+    expect(caseArtifact.evidence.filter((evidence) =>
+      evidence.discovery.method === "interview" && evidence.critical &&
+      caseArtifact.solution.requiredEvidenceIds.includes(evidence.id),
+    )).toHaveLength(2);
+    expect(solveCase({
+      ...caseArtifact,
+      evidence: caseArtifact.evidence.filter((evidence) => evidence.discovery.method !== "interview"),
+    })).toMatchObject({ status: "unique", culpritId: caseArtifact.culpritId });
+    expect(validatePublishableCaseArtifact(caseArtifact).issues).toEqual([
+      expect.objectContaining({ code: "unnecessary_interview_evidence", path: "evidence" }),
+    ]);
+  });
+
+  it.each(["prerequisite", "scene_unlock", "evidence_unlock", "character_unlock"] as const)("accepts an interview needed to unlock decisive records through %s", async (gate) => {
+    const { tutorialCase } = await import("@/content/tutorial/tutorial-case");
+    const caseArtifact = structuredClone(tutorialCase);
+    const interview = caseArtifact.evidence.find(
+      (evidence) => evidence.id === "evidence_livestream_record",
+    )!;
+    const archive = {
+      ...structuredClone(interview),
+      id: "evidence_platform_archive",
+      name: "平台提供的直播存档",
+      description: "使用陈默提供的回放凭据调取平台原始存档，连续画面和观众互动覆盖案发时间，证明他全程在城南诊所。",
+      discovery: {
+        method: "query" as const,
+        actionAliases: ["用回放凭据调阅直播存档"],
+        prerequisiteEvidenceIds: gate === "prerequisite" ? [interview.id] : [],
+        sceneId: gate === "scene_unlock" ? "scene_archive" : undefined,
+        characterId: gate === "character_unlock" ? "character_han_zhuo" : undefined,
+      },
+    };
+    interview.name = "陈默提供的回放凭据";
+    interview.description = "陈默提供了直播回放凭据，需据此向平台调取原始存档核验当晚行踪。";
+    interview.discovery.dialogueUtterance = "我可以提供回放凭据，你们可以据此调阅平台原始存档核验。";
+    interview.kind = "testimony";
+    interview.supportsFactIds = [];
+    interview.excludesCharacterIds = [];
+    caseArtifact.evidence.push(archive);
+    caseArtifact.solution.requiredEvidenceIds.push(archive.id);
+    if (gate === "scene_unlock") {
+      caseArtifact.scenes.push({ id: "scene_archive", name: "平台档案室", description: "按回放凭据调阅的录像档案。", initiallyUnlocked: false, objects: [] });
+    }
+    if (gate !== "prerequisite") {
+      if (gate === "character_unlock") {
+        caseArtifact.unlockRules = caseArtifact.unlockRules.filter((rule) => rule.targetId !== "character_han_zhuo");
+      }
+      caseArtifact.unlockRules.push({
+        id: "unlock_platform_archive",
+        targetType: gate === "scene_unlock" ? "scene" : gate === "character_unlock" ? "character" : "evidence",
+        targetId: gate === "scene_unlock" ? "scene_archive" : gate === "character_unlock" ? "character_han_zhuo" : archive.id,
+        allEvidenceIds: [interview.id],
+        anyEvidenceIds: [],
+      });
+    }
+
+    expect(validatePublishableCaseArtifact(caseArtifact)).toEqual({ valid: true, issues: [] });
+  });
+
+  it.each(["supporting-seed-1", "supporting-seed-0", "supporting-seed-3"])("accepts generated cases with genuinely necessary interviews: %s", (seed) => {
+    expect(validatePublishableCaseArtifact(makeGeneratedCaseArtifact("case_required_interview", seed)))
+      .toEqual({ valid: true, issues: [] });
   });
 
   it("requires deterministic prompts and a spoken response for each interview evidence", async () => {

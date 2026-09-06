@@ -23,16 +23,15 @@ import {
   type CaseArtifact,
   type CaseArtifactRepairPatch,
 } from "@/domain/case/case-artifact";
-import {
-  findInitiallyDiscoverableSceneEvidenceIds,
-  findReachableEvidenceIds,
-} from "@/domain/case/evidence-reachability";
-import { validatePublishableCaseArtifact } from "@/domain/case/case-validator";
+import { validatePublishableCaseArtifact, type CaseValidationIssue } from "@/domain/case/case-validator";
+import { findReachableEvidenceIds } from "@/domain/case/evidence-reachability";
+import { solveCaseWithEvidenceIds } from "@/domain/case/case-solver";
 
 import {
-  buildBlindSolveMessages,
+  buildBlindSolveInput,
   buildCaseDraftMessages,
   buildCaseRepairMessages,
+  buildOpeningReviewMessages,
 } from "./generation-prompts";
 import {
   deriveGenerationPlan,
@@ -43,13 +42,19 @@ import {
   blindSolveResultSchema,
   caseGenerationRequestSchema,
   generationIssueSchema,
+  openingReviewSchema,
+  publicWindowReviewSchema,
   type BlindSolveResult,
 } from "./generation-schema";
+import { buildEvidenceReviewPlan } from "./evidence-review";
+import { EvidenceReviewBatchError, reviewEvidenceInBatches } from "./evidence-review-batches";
+import { buildCaseRepairContract, findAcquisitionRepairRegressions } from "./case-repair-contract";
 
 const fullArtifactMaxTokens = 12_000;
 const repairPatchMaxTokens = 3_200;
-const defaultMaxArtifactAttempts =
-  1 + Math.floor(fullArtifactMaxTokens / repairPatchMaxTokens);
+const reasoningTokenAllowance = 6_000;
+const defaultMaxArtifactAttempts = 6;
+class AcquisitionRepairRegressionError extends Error {}
 
 const formatRepairTargetSchema = z
   .object({
@@ -68,7 +73,10 @@ const CaseGenerationState = new StateSchema({
   draft: caseArtifactSchema.nullable().default(null),
   validationIssues: z.array(generationIssueSchema).default([]),
   formatRepairTargets: z.array(formatRepairTargetSchema).default([]),
+  repairFormatIssues: z.array(generationIssueSchema).default([]),
+  reviewFeedback: z.array(generationIssueSchema).default([]),
   blindSolve: blindSolveResultSchema.nullable().default(null),
+  publicWindowReview: publicWindowReviewSchema.nullable().default(null),
   finalArtifact: caseArtifactSchema.nullable().default(null),
   rejectionReason: z.string().nullable().default(null),
   modelCalls: z.array(modelCallAuditSchema).default([]),
@@ -100,7 +108,7 @@ export function createCaseGenerationGraph(
   provider: StructuredModelProvider,
   options: CaseGenerationGraphOptions = {},
 ) {
-  // 首稿后最多三次紧凑补丁；合计输出上限仍小于一次完整案件重写。
+  // 首稿后最多五次紧凑补丁，为结构通过后才发现的语义问题保留重修余量。
   const maxArtifactAttempts = options.maxArtifactAttempts ?? defaultMaxArtifactAttempts;
   const reportProgress = async (
     stage: CaseGenerationStage,
@@ -123,7 +131,8 @@ export function createCaseGenerationGraph(
         schema: caseArtifactSchema,
         schemaName: "case_artifact",
         messages,
-        // 第一版只需要紧凑、可校验的案件账本；过大的输出上限会让 V4 长时间占用请求。
+        // 首稿直接输出紧凑账本，推理预算留给独立审查，避免在写稿阶段长时间等待。
+        reasoning: false,
         temperature: 0.35,
         maxTokens: fullArtifactMaxTokens,
       });
@@ -187,14 +196,19 @@ export function createCaseGenerationGraph(
       });
     }
     const generationPlan = deriveGenerationPlan(state.request.seed);
+    const validationIssues = mergeRepairIssues([
+      ...report.issues,
+      ...requestIssues,
+      ...validateGeneratedCharacterPlan(state.draft, generationPlan),
+      ...validateInitialScenePacing(state.draft),
+      ...state.formatRepairTargets.map(formatRepairIssue),
+      ...state.repairFormatIssues,
+    ], state.repairFormatIssues.length > 0
+      ? state.validationIssues.filter((issue) => issue.code !== "invalid_repair_patch")
+      : []);
     return {
-      validationIssues: [
-        ...report.issues,
-        ...requestIssues,
-        ...validateGeneratedCharacterPlan(state.draft, generationPlan),
-        ...validateInitialScenePacing(state.draft),
-        ...state.formatRepairTargets.map(formatRepairIssue),
-      ],
+      validationIssues,
+      reviewFeedback: mergeRepairIssues(state.reviewFeedback, validationIssues),
     };
   };
 
@@ -208,34 +222,44 @@ export function createCaseGenerationGraph(
       35 + completedRepairPasses * 20,
     );
     if (!state.draft) throw new Error("Cannot repair an empty case draft");
+    const repairContract = buildCaseRepairContract(state.draft, state.validationIssues, state.publicWindowReview);
+    const acquisitionRepair = repairContract.scope?.mode === "acquisition";
     const messages = buildCaseRepairMessages({
       request: state.request,
       draft: state.draft,
       issues: state.validationIssues,
+      repairScope: repairContract.scope,
+      publicWindowReview: state.publicWindowReview,
     });
     let completedRepairResult: StructuredModelResult<CaseArtifactRepairPatch> | null =
       null;
     try {
       const result = await provider.invokeStructured({
         tier: "pro",
-        schema: caseArtifactRepairPatchSchema,
+        schema: repairContract.schema,
         schemaName: "case_artifact_repair_patch",
         messages,
+        reasoning: acquisitionRepair,
+        ...(acquisitionRepair ? { reasoningEffort: "low" as const } : {}),
         temperature: 0.2,
-        // 局部补丁只含问题字段：上限远小于完整案件，避免失败修复比重新生成更慢。
-        maxTokens: repairPatchMaxTokens,
+        maxTokens: repairPatchMaxTokens + (acquisitionRepair ? reasoningTokenAllowance : 0),
       });
       completedRepairResult = result;
+      const candidate = compileMinimumSolutionChain(applyCaseArtifactRepairPatch(state.draft, result.value));
+      const regressions = acquisitionRepair ? findAcquisitionRepairRegressions(state.draft, candidate, state.request.seed) : [];
+      if (regressions.length > 0) throw new AcquisitionRepairRegressionError(
+        `候选补丁新增、未提交；原稿保持：${regressions.map((issue) => `${issue.code} ${issue.path}: ${issue.message}`).join("; ")}`,
+      );
       return {
         attempt: state.attempt + 1,
-        draft: compileMinimumSolutionChain(
-          applyCaseArtifactRepairPatch(state.draft, result.value),
-        ),
+        draft: candidate,
         formatRepairTargets: unresolvedFormatRepairTargets(
           state.formatRepairTargets,
           result.value,
         ),
         blindSolve: null,
+        publicWindowReview: null,
+        repairFormatIssues: [],
         modelCalls: [
           ...state.modelCalls,
           createModelCallAudit("case_repair", "pro", messages, result),
@@ -270,12 +294,18 @@ export function createCaseGenerationGraph(
         maxArtifactAttempts,
         error: error instanceof Error ? error.message : String(error),
       });
-      // 结构化输出偶发不合规时保留原案卷并消耗一次轻量修复预算；下轮会带着同一批
-      // validator issues 再请求补丁，而不是把一次格式波动直接暴露给玩家。
+      // 保留原案卷，并把具体格式问题带进下轮，避免重复提交同一份无效补丁。
       return {
         attempt: state.attempt + 1,
         draft: state.draft,
         blindSolve: null,
+        repairFormatIssues: [{
+          code: "invalid_repair_patch",
+          path: "repairPatch",
+          message: error instanceof AcquisitionRepairRegressionError ? error.message : isStructuredOutputValidationError(error)
+            ? error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+            : (error instanceof Error ? error.message : String(error)).slice(0, 700),
+        }],
         modelCalls: formatFailureAudit
           ? [...state.modelCalls, formatFailureAudit]
           : state.modelCalls,
@@ -286,21 +316,81 @@ export function createCaseGenerationGraph(
   const blindSolve: typeof CaseGenerationState.Node = async (state) => {
     await reportProgress("blind_solving", 92);
     if (!state.draft) throw new Error("Cannot blind-solve an empty case draft");
-    const messages = buildBlindSolveMessages(state.draft);
+    const reviewMessages = buildOpeningReviewMessages(state.draft);
+    const review = await provider.invokeStructured({
+      tier: "pro",
+      schema: openingReviewSchema,
+      schemaName: "case_opening_review",
+      messages: reviewMessages,
+      reasoning: true,
+      reasoningEffort: "low",
+      temperature: 0,
+      maxTokens: 1_200 + reasoningTokenAllowance,
+    });
+    const reviewAudit = createModelCallAudit("opening_review", "pro", reviewMessages, review);
+    const disclosureIssues = review.value.issues.filter((issue) => issue.kind !== "ordinary_lead");
+    if (disclosureIssues.length > 0) {
+      const issues = disclosureIssues.map((issue) => ({
+        code: "initial_information_shortcut",
+        path: issue.path,
+        message: `${issue.quote}: ${issue.reason}`,
+      }));
+      return {
+        blindSolve: null,
+        validationIssues: issues,
+        reviewFeedback: mergeRepairIssues(state.reviewFeedback, issues),
+        modelCalls: [...state.modelCalls, reviewAudit],
+      };
+    }
+    const evidenceReviewPlan = buildEvidenceReviewPlan(state.draft);
+    const evidenceReview = await reviewEvidenceInBatches(provider, state.draft, evidenceReviewPlan).catch((error: unknown) => {
+      if (error instanceof EvidenceReviewBatchError) {
+        error.modelCalls.unshift(...state.modelCalls, reviewAudit);
+      }
+      throw error;
+    });
+    const issues = evidenceReview.issues;
+    if (issues.length > 0) {
+      return {
+        blindSolve: null,
+        publicWindowReview: evidenceReview.publicWindowReview,
+        validationIssues: issues,
+        reviewFeedback: mergeRepairIssues(state.reviewFeedback, issues),
+        modelCalls: [...state.modelCalls, reviewAudit, ...evidenceReview.modelCalls],
+      };
+    }
+    const blindInput = buildBlindSolveInput(state.draft);
+    const messages = blindInput.messages;
     const result = await provider.invokeStructured({
       tier: "pro",
       schema: blindSolveResultSchema,
       schemaName: "blind_case_solution",
       messages,
+      reasoning: true,
+      reasoningEffort: "low",
       temperature: 0,
-      maxTokens: 2_000,
+      maxTokens: 2_000 + reasoningTokenAllowance,
     });
+    const restored = blindInput.restoreResult(result.value);
+    const modelCalls = [
+      ...state.modelCalls,
+      reviewAudit,
+      ...evidenceReview.modelCalls,
+      createModelCallAudit("blind_solve", "pro", messages, result),
+    ];
+    if (!restored) {
+      const issues = [{
+        code: "blind_solver_mismatch",
+        path: "evidence",
+        message: "盲解返回了未提供的人物或证据编号，不能建立有效的引用链。",
+      }];
+      return { blindSolve: null, publicWindowReview: evidenceReview.publicWindowReview, validationIssues: issues, reviewFeedback: mergeRepairIssues(state.reviewFeedback, issues), modelCalls };
+    }
     return {
-      blindSolve: result.value,
-      modelCalls: [
-        ...state.modelCalls,
-        createModelCallAudit("blind_solve", "pro", messages, result),
-      ],
+      blindSolve: restored,
+      publicWindowReview: evidenceReview.publicWindowReview,
+      reviewFeedback: blindSolveSupportsConclusion(state.draft, restored) ? [] : state.reviewFeedback,
+      modelCalls,
     };
   };
 
@@ -309,7 +399,7 @@ export function createCaseGenerationGraph(
       {
         code: "blind_solver_mismatch",
         path: "evidence",
-        message: `blind solver selected "${state.blindSolve?.culpritId ?? "none"}" instead of the truth-ledger culprit`,
+        message: `blind conclusion or its cited evidence does not establish the complete solution; selected "${state.blindSolve?.culpritId ?? "none"}"; cited ${state.blindSolve?.evidenceIds.join(", ") ?? "none"}; reasoning: ${state.blindSolve?.reasoning ?? "none"}`,
       },
     ],
   });
@@ -353,15 +443,21 @@ export function createCaseGenerationGraph(
     .addEdge("repair_case", "validate_case")
     .addConditionalEdges(
       "blind_solve_case",
-      (state) =>
-        state.draft &&
+      (state) => {
+        if (state.validationIssues.length > 0) {
+          return state.attempt < maxArtifactAttempts ? "repair" : "reject";
+        }
+        return state.draft &&
         state.blindSolve &&
         blindSolveSupportsConclusion(state.draft, state.blindSolve)
           ? "finalize"
-          : "mismatch",
+          : "mismatch";
+      },
       {
         finalize: "finalize_case",
         mismatch: "record_blind_failure",
+        repair: "repair_case",
+        reject: "reject_case",
       },
     )
     .addConditionalEdges(
@@ -371,7 +467,15 @@ export function createCaseGenerationGraph(
     )
     .addEdge("finalize_case", END)
     .addEdge("reject_case", END)
-    .compile({ checkpointer: options.checkpointer });
+    .compile({ checkpointer: options.checkpointer })
+    // 每版最多经过生成/补丁、校验、盲解与失败记录四个节点，另留终态步数。
+    .withConfig({ recursionLimit: maxArtifactAttempts * 4 + 2 });
+}
+
+function mergeRepairIssues(previous: CaseValidationIssue[], current: CaseValidationIssue[]) {
+  return [...new Map(
+    [...previous, ...current].map((issue) => [`${issue.code}:${issue.path}`, issue]),
+  ).values()];
 }
 
 export function blindSolveSupportsConclusion(
@@ -382,14 +486,20 @@ export function blindSolveSupportsConclusion(
   const evidenceById = new Map(
     caseArtifact.evidence.map((evidence) => [evidence.id, evidence]),
   );
-  const citedEvidence = blindSolve.evidenceIds.map((id) => evidenceById.get(id));
+  const citedIds = new Set(blindSolve.evidenceIds);
+  const reachableIds = findReachableEvidenceIds(caseArtifact);
+  if ([...citedIds].some((id) => !reachableIds.has(id))) return false;
+  const citedEvidence = [...citedIds].map((id) => evidenceById.get(id));
   if (citedEvidence.length < 3 || citedEvidence.some((evidence) => !evidence)) {
     return false;
   }
   const supportedFactIds = new Set(
     citedEvidence.flatMap((evidence) => evidence?.supportsFactIds ?? []),
   );
+  const citedSolution = solveCaseWithEvidenceIds(caseArtifact, citedIds);
   return (
+    citedSolution.status === "unique" &&
+    citedSolution.culpritId === caseArtifact.culpritId &&
     citedEvidence.some((evidence) =>
       evidence?.implicatesCharacterIds.includes(caseArtifact.culpritId),
     ) &&
@@ -399,6 +509,7 @@ export function blindSolveSupportsConclusion(
 }
 
 function isRecoverableRepairFormatError(error: unknown) {
+  if (error instanceof AcquisitionRepairRegressionError) return true;
   if (error instanceof z.ZodError) return true;
   if (
     isStructuredOutputParseError(error) &&
@@ -523,169 +634,42 @@ function readNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-/**
- * 将模型已声明的 solution 元数据编译为解题器可检查的最小证据链。
- *
- * 这一步不选择或替换真凶、动机、手法；它会闭合可确定修复的列表引用、补齐模型
- * 经常遗漏的 supports/implicates/excludes 关系，并把首发证据中的嫌疑人姓名替换为
- * 中性称谓。随后仍必须通过盲解，避免“字段正确、故事不通”的案件被发布。
- */
+/** 保留模型设计的证据链；缺失的证明关系和错误前置条件交由校验与修复。 */
 export function compileMinimumSolutionChain(
   caseArtifact: CaseArtifact,
 ): CaseArtifact {
-  // 先做只涉及“已存在实体”的无损闭包，避免把可确定修复的悬空列表引用和
-  // 角色知识边界交给概率性补丁。无法安全推断的标量引用仍保留给 validator。
-  const referenceClosedCaseArtifact = normalizeRepairableReferenceDrift(
-    caseArtifact,
-  );
-  // 现场物证能支撑手法或时间线，但不应直接承担“排除全部其他嫌疑人”的关系。
-  // 这一步只移除过强的结构标记；后续仍由编译链和发布校验确保非现场证据可以
-  // 独立完成排除，避免把一份失去唯一解的案卷静默发布。
-  const normalizedCaseArtifact = normalizePrematureSceneEvidence(
-    referenceClosedCaseArtifact,
-  );
-  const suspectIds = normalizedCaseArtifact.characters
-    .filter((character) => character.roleTier === "suspect")
-    .map((character) => character.id);
-  const culpritId = normalizedCaseArtifact.culpritId;
-  const otherSuspectIds = suspectIds.filter((id) => id !== culpritId);
-  const evidenceById = new Map(
-    normalizedCaseArtifact.evidence.map((evidence) => [evidence.id, evidence]),
-  );
-  const initialSceneEvidenceIds = findInitiallyDiscoverableSceneEvidenceIds(
-    normalizedCaseArtifact,
-  );
-  const reachableEvidenceIds = findReachableEvidenceIds(normalizedCaseArtifact);
-  const candidateEvidenceIds = uniqueIds([
-    ...normalizedCaseArtifact.solution.requiredEvidenceIds,
-    ...reachableEvidenceIds,
-  ]).filter(
-    (id) =>
-      evidenceById.has(id) &&
-      reachableEvidenceIds.has(id) &&
-      !initialSceneEvidenceIds.has(id),
-  );
+  return normalizeRepairableReferenceDrift(normalizeClaimIdCollisions(caseArtifact));
+}
 
-  if (
-    suspectIds.length !== 4 ||
-    otherSuspectIds.length !== 3 ||
-    candidateEvidenceIds.length < 5 ||
-    !normalizedCaseArtifact.facts.some(
-      (fact) => fact.id === normalizedCaseArtifact.solution.motiveFactId,
-    ) ||
-    !normalizedCaseArtifact.facts.some(
-      (fact) => fact.id === normalizedCaseArtifact.solution.methodFactId,
-    )
-  ) {
-    return normalizedCaseArtifact;
+/** fact 与 claim 常被模型用同一 ID 命名；按引用类型改名，不改变陈述或证明关系。 */
+function normalizeClaimIdCollisions(caseArtifact: CaseArtifact): CaseArtifact {
+  const otherIds = new Set([
+    ...caseArtifact.characters, ...caseArtifact.scenes,
+    ...caseArtifact.scenes.flatMap((scene) => scene.objects),
+    ...caseArtifact.facts, ...caseArtifact.timeline, ...caseArtifact.evidence,
+    ...caseArtifact.unlockRules, ...caseArtifact.hintChains,
+  ].map((item) => item.id));
+  const reservedIds = new Set([...otherIds, ...caseArtifact.claims.map((claim) => claim.id)]);
+  const replacements = new Map<string, string>();
+  for (const claim of caseArtifact.claims) {
+    if (!otherIds.has(claim.id) || replacements.has(claim.id)) continue;
+    let id = `claim_${claim.id}`;
+    while (reservedIds.has(id)) id = `claim_${id}`;
+    replacements.set(claim.id, id);
+    reservedIds.add(id);
   }
-
-  const directSceneEvidenceIds = new Set(
-    candidateEvidenceIds.filter((id) => {
-      const evidence = evidenceById.get(id);
-      return (
-        Boolean(evidence?.discovery.sceneId) &&
-        (evidence?.kind === "physical" || evidence?.kind === "forensic")
-      );
-    }),
-  );
-  const nonDirectEvidenceIds = candidateEvidenceIds.filter(
-    (id) => !directSceneEvidenceIds.has(id),
-  );
-  // 现场法证可以支撑推理，但不能被编译器自动拼成三条以内的直指结论。
-  // 决定性链条必须跨过人物对话和非现场直证，保留玩家调查与交叉验证的空间。
-  const allInterviewEvidenceIds = nonDirectEvidenceIds.filter((id) => {
-    const evidence = evidenceById.get(id);
-    return (
-      evidence?.discovery.method === "interview" &&
-      Boolean(evidence.discovery.characterId)
-    );
-  });
-  const characterById = new Map(
-    normalizedCaseArtifact.characters.map((character) => [character.id, character]),
-  );
-  const witnessInterviewEvidenceIds = allInterviewEvidenceIds.filter((id) => {
-    const characterId = evidenceById.get(id)?.discovery.characterId;
-    return characterById.get(characterId ?? "")?.roleTier === "witness";
-  });
-  const interviewEvidenceIds = takeDistinctInterviewCharacters(
-    witnessInterviewEvidenceIds,
-    evidenceById,
-    2,
-  );
-  const requiredInterviewEvidenceIds =
-    interviewEvidenceIds.length === 2
-      ? interviewEvidenceIds
-      : takeDistinctInterviewCharacters(allInterviewEvidenceIds, evidenceById, 2);
-  // Keep two witness conversations in the decisive chain. If the draft does not
-  // contain them, publication validation will send it through the repair pass.
-  if (requiredInterviewEvidenceIds.length < 2) {
-    return normalizedCaseArtifact;
-  }
-  const nonInterviewEvidenceIds = nonDirectEvidenceIds.filter(
-    (id) => !allInterviewEvidenceIds.includes(id),
-  );
-  if (nonInterviewEvidenceIds.length < 3) {
-    return normalizedCaseArtifact;
-  }
-  const requiredEvidenceIds = [
-    ...requiredInterviewEvidenceIds,
-    ...nonInterviewEvidenceIds.slice(0, 3),
-  ];
-  const chainIndexByEvidenceId = new Map(
-    requiredEvidenceIds.map((id, index) => [id, index]),
-  );
-
+  if (replacements.size === 0) return caseArtifact;
+  const claimId = (id: string) => replacements.get(id) ?? id;
   return {
-    ...normalizedCaseArtifact,
-    evidence: normalizedCaseArtifact.evidence.map((evidence) => {
-      const chainIndex = chainIndexByEvidenceId.get(evidence.id);
-      const excludesCharacterIds = evidence.excludesCharacterIds.filter(
-        (id) => id !== culpritId,
-      );
-      if (chainIndex === undefined) {
-        return { ...evidence, excludesCharacterIds };
-      }
-
-      const supportsFactIds =
-        chainIndex === 0
-          ? uniqueIds([
-              ...evidence.supportsFactIds,
-              normalizedCaseArtifact.solution.motiveFactId,
-            ])
-          : chainIndex === 1
-            ? uniqueIds([
-                ...evidence.supportsFactIds,
-                normalizedCaseArtifact.solution.methodFactId,
-              ])
-            : evidence.supportsFactIds;
-      const implicatesCharacterIds =
-        chainIndex <= 1
-          ? uniqueIds([...evidence.implicatesCharacterIds, culpritId])
-          : evidence.implicatesCharacterIds;
-      const excludedSuspectId = chainIndex >= 2
-        ? otherSuspectIds[chainIndex - 2]
-        : undefined;
-
-      return {
-        ...evidence,
-        critical: true,
-        supportsFactIds,
-        implicatesCharacterIds,
-        excludesCharacterIds: excludedSuspectId
-          ? uniqueIds([...excludesCharacterIds, excludedSuspectId])
-          : excludesCharacterIds,
-        discovery: {
-          ...evidence.discovery,
-          // 必要证据必须可达，避免模型把它们全部藏在相互依赖的解锁链后。
-          prerequisiteEvidenceIds: [],
-        },
-      };
-    }),
-    solution: {
-      ...normalizedCaseArtifact.solution,
-      requiredEvidenceIds,
-    },
+    ...caseArtifact,
+    claims: caseArtifact.claims.map((claim) => ({ ...claim, id: claimId(claim.id) })),
+    characters: caseArtifact.characters.map((character) => ({
+      ...character,
+      knowledge: { ...character.knowledge, claimIds: character.knowledge.claimIds.map(claimId) },
+    })),
+    evidence: caseArtifact.evidence.map((evidence) => ({
+      ...evidence, contradictsClaimIds: evidence.contradictsClaimIds.map(claimId),
+    })),
   };
 }
 
@@ -776,19 +760,9 @@ function normalizeRepairableReferenceDrift(
         characterIds,
       ),
       excludesCharacterIds: knownIds(evidence.excludesCharacterIds, characterIds),
-      discovery: {
-        ...evidence.discovery,
-        prerequisiteEvidenceIds: knownIds(
-          evidence.discovery.prerequisiteEvidenceIds,
-          evidenceIds,
-        ),
-      },
+      discovery: evidence.discovery,
     })),
-    unlockRules: caseArtifact.unlockRules.map((rule) => ({
-      ...rule,
-      allEvidenceIds: knownIds(rule.allEvidenceIds, evidenceIds),
-      anyEvidenceIds: knownIds(rule.anyEvidenceIds, evidenceIds),
-    })),
+    unlockRules: caseArtifact.unlockRules,
     solution: {
       ...caseArtifact.solution,
       requiredEvidenceIds: knownIds(
@@ -801,106 +775,6 @@ function normalizeRepairableReferenceDrift(
       ),
     },
   };
-}
-
-function normalizePrematureSceneEvidence(caseArtifact: CaseArtifact): CaseArtifact {
-  const initialSceneEvidenceIds = findInitiallyDiscoverableSceneEvidenceIds(
-    caseArtifact,
-  );
-  const factById = new Map(caseArtifact.facts.map((fact) => [fact.id, fact]));
-  const sensitiveFactTypes = new Set([
-    "identity",
-    "motive",
-    "method",
-    "opportunity",
-    "alibi",
-  ]);
-  const suspectNames = caseArtifact.characters
-    .filter((character) => character.roleTier === "suspect")
-    .map((character) => character.name);
-  let changed = false;
-  const evidence = caseArtifact.evidence.map((item) => {
-    const isInitialSceneEvidence = initialSceneEvidenceIds.has(item.id);
-    const mustClearDirectExclusions = isDirectScenePhysicalOrForensicEvidence(item);
-    const supportsFactIds = isInitialSceneEvidence
-      ? item.supportsFactIds.filter(
-          (factId) => {
-            const fact = factById.get(factId);
-            return (
-              !sensitiveFactTypes.has(fact?.type ?? "") &&
-              !suspectNames.some((name) => fact?.statement.includes(name))
-            );
-          },
-        )
-      : item.supportsFactIds;
-    const implicatesCharacterIds = isInitialSceneEvidence
-      ? []
-      : item.implicatesCharacterIds;
-    const excludesCharacterIds =
-      isInitialSceneEvidence || mustClearDirectExclusions
-        ? []
-        : item.excludesCharacterIds;
-    const name = isInitialSceneEvidence
-      ? redactSuspectNames(item.name, suspectNames)
-      : item.name;
-    const description = isInitialSceneEvidence
-      ? redactSuspectNames(item.description, suspectNames)
-      : item.description;
-    if (
-      supportsFactIds.length === item.supportsFactIds.length &&
-      implicatesCharacterIds.length === item.implicatesCharacterIds.length &&
-      excludesCharacterIds.length === item.excludesCharacterIds.length &&
-      name === item.name &&
-      description === item.description
-    ) {
-      return item;
-    }
-    changed = true;
-    return {
-      ...item,
-      name,
-      description,
-      supportsFactIds,
-      implicatesCharacterIds,
-      excludesCharacterIds,
-    };
-  });
-
-  return changed ? { ...caseArtifact, evidence } : caseArtifact;
-}
-
-function redactSuspectNames(text: string, suspectNames: readonly string[]) {
-  return suspectNames.reduce(
-    (redacted, suspectName) =>
-      redacted.replaceAll(suspectName, "某位涉案人员"),
-    text,
-  );
-}
-
-function takeDistinctInterviewCharacters(
-  evidenceIds: string[],
-  evidenceById: ReadonlyMap<string, CaseArtifact["evidence"][number]>,
-  count: number,
-) {
-  const characterIds = new Set<string>();
-  const selectedEvidenceIds: string[] = [];
-  for (const evidenceId of evidenceIds) {
-    const characterId = evidenceById.get(evidenceId)?.discovery.characterId;
-    if (!characterId || characterIds.has(characterId)) continue;
-    characterIds.add(characterId);
-    selectedEvidenceIds.push(evidenceId);
-    if (selectedEvidenceIds.length === count) break;
-  }
-  return selectedEvidenceIds;
-}
-
-function isDirectScenePhysicalOrForensicEvidence(
-  evidence: CaseArtifact["evidence"][number],
-) {
-  return (
-    Boolean(evidence.discovery.sceneId) &&
-    (evidence.kind === "physical" || evidence.kind === "forensic")
-  );
 }
 
 function uniqueIds(ids: Iterable<string>): string[] {

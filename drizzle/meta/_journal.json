@@ -15,6 +15,13 @@
       "when": 1788237250119,
       "tag": "0001_wet_zombie",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788591363939,
+      "tag": "0002_player_protocol_secret",
+      "breakpoints": true
     }
   ]
 }

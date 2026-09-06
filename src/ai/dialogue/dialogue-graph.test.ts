@@ -2,12 +2,13 @@ import { MemorySaver } from "@langchain/langgraph";
 import { describe, expect, it } from "vitest";
 
 import type {
+  ModelMessage,
   StructuredModelProvider,
   StructuredModelRequest,
   StructuredModelResult,
 } from "@/ai/model-provider";
 import { tutorialCase } from "@/content/tutorial/tutorial-case";
-import { startGame } from "@/domain/game/game-runtime";
+import { recordDialogueTurn, startGame } from "@/domain/game/game-runtime";
 
 import { createDialogueGraph } from "./dialogue-graph";
 import { buildCharacterContext } from "./dialogue-prompts";
@@ -26,7 +27,7 @@ describe("dialogue graph", () => {
 
     expect({
       includesPrivateProfile: serialized.includes("起初不敢指认雇主的财务主管"),
-      includesKnownFact: serialized.includes("死亡发生在二十一点十分前后"),
+      includesKnownFact: serialized.includes(tutorialCase.facts.find((fact) => fact.id === "fact_time_of_death")!.statement),
       includesOwnClaim: serialized.includes("claim_luo_tea"),
       leaksCulpritProfile: serialized.includes("挪用资金即将败露"),
       leaksGlobalCulpritId: serialized.includes("culpritId"),
@@ -88,6 +89,9 @@ describe("dialogue graph", () => {
         "dialogue_guard",
       ],
     });
+    const repairedContext = JSON.parse(provider.requests[1].messages[1].content.replace(/^CHARACTER_CONTEXT\n/u, ""));
+    expect(repairedContext.rejectedDraft.disclosedClaimIds).toEqual(["claim_li_alibi"]);
+    expect(repairedContext.repairFeedback).toContain("unsupported_claim");
   });
 
   it("accepts an authorized lie without a semantic guard round trip", async () => {
@@ -134,7 +138,7 @@ describe("dialogue graph", () => {
       rejectedGuard,
     ]);
     const graph = createDialogueGraph(provider, { maxDraftAttempts: 2 });
-    const result = await graph.invoke(graphInput("command_dialogue_fallback"));
+    const result = await graph.invoke({ ...graphInput("command_dialogue_fallback"), playerText: "李闻舟当时说了什么？" });
 
     expect(result.finalResponse).toMatchObject({
       demeanor: "cooperative",
@@ -206,7 +210,7 @@ describe("dialogue graph", () => {
     expect(provider.requests).toEqual([]);
   });
 
-  it("repeats an already disclosed alibi for a verification follow-up before calling the model", async () => {
+  it("answers an unknown verification detail from the ledger boundary without model invention", async () => {
     const rejectedGuard = {
       safe: false,
       violationCodes: ["unsupported_claim"],
@@ -219,22 +223,20 @@ describe("dialogue graph", () => {
       rejectedGuard,
     ]);
     const graph = createDialogueGraph(provider, { maxDraftAttempts: 2 });
-    const session = {
-      ...startGame(tutorialCase, { sessionId: "game_dialogue_alibi_followup" }),
-      discoveredClaimIds: ["claim_li_alibi"],
-      dialogue: [
-        {
-          commandId: "command_dialogue_initial_alibi",
-          at: "2026-08-31T10:00:00+08:00",
-          characterId: "character_li_wenzhou",
-          playerText: "案发时你在哪里？",
+    const session = recordDialogueTurn(
+      tutorialCase,
+      startGame(tutorialCase, { sessionId: "game_dialogue_alibi_followup" }),
+      {
+        commandId: "command_dialogue_initial_alibi",
+        characterId: "character_li_wenzhou",
+        playerText: "案发时你在哪里？",
+        response: {
+          ...guardedNoncommittalResponse(),
           utterance: "九点前后我一直在客房打电话，从未上过二楼。",
-          demeanor: "guarded" as const,
           disclosedClaimIds: ["claim_li_alibi"],
-          discoveredEvidenceIds: [],
         },
-      ],
-    };
+      },
+    ).session;
     const result = await graph.invoke({
       ...graphInput("command_dialogue_alibi_followup"),
       session,
@@ -243,12 +245,62 @@ describe("dialogue graph", () => {
     });
 
     expect(result.finalResponse).toMatchObject({
-      utterance: "九点前后我一直在客房打电话，从未上过二楼。",
+      utterance: "关于这段行踪，我目前提供不了可以核实的人证信息。",
       demeanor: "guarded",
-      disclosedClaimIds: ["claim_li_alibi"],
+      disclosedClaimIds: [],
       stateDelta: { trust: 0, pressure: 0, alertness: 0 },
     });
     expect(provider.requests).toEqual([]);
+  });
+
+  it.each([
+    "陈默能证明我一直待在客房。",
+    "陈默在九点十五分看见我。",
+    "门禁记录能证实我没有离开。",
+  ])("reviews and rejects added details even when an authorized lie is cited: %s", async (fabrication) => {
+    const alibi = tutorialCase.claims.find((claim) => claim.id === "claim_li_alibi")!;
+    const provider = new ScriptedProvider([
+      {
+        ...guardedNoncommittalResponse(),
+        utterance: `${alibi.statement}${fabrication}`,
+        disclosedClaimIds: [alibi.id],
+      },
+      { safe: false, violationCodes: ["unsupported_claim"], feedback: "新增证明细节没有依据" },
+    ]);
+    const result = await createDialogueGraph(provider, { maxDraftAttempts: 1 }).invoke({
+      ...graphInput("command_added_alibi_detail"),
+      characterId: alibi.speakerId,
+      playerText: "那天你都在干什么？",
+    });
+
+    expect(provider.requests.map((request) => request.schemaName)).toEqual([
+      "character_response", "dialogue_guard",
+    ]);
+    expect(result.finalResponse?.utterance).not.toContain(fabrication);
+    expect(result.finalResponse?.disclosedClaimIds).toEqual([alibi.id]);
+    expect(provider.requests[1]?.messages[0]?.content).toContain("引用合法 claim 不代表整段话都获授权");
+  });
+
+  it("rejects the same old claim verbatim but accepts a grounded paraphrase on retry", async () => {
+    const alibi = tutorialCase.claims.find((claim) => claim.id === "claim_li_alibi")!;
+    const response = { ...guardedNoncommittalResponse(), utterance: alibi.statement, disclosedClaimIds: [alibi.id] };
+    const session = recordDialogueTurn(tutorialCase, graphInput("initial").session, {
+      commandId: "initial", characterId: alibi.speakerId, playerText: "那天你在做什么？", response,
+    }).session;
+    const paraphrase = { ...response, utterance: `我的说法仍是：${alibi.statement}` };
+    const provider = new ScriptedProvider([
+      response, paraphrase, { safe: true, violationCodes: [], feedback: "", groundingChecks: [{ candidateText: paraphrase.utterance, sourceText: alibi.statement }] },
+    ]);
+    const result = await createDialogueGraph(provider).invoke({
+      ...graphInput("paraphrase"), session, characterId: alibi.speakerId, playerText: "我问的是九点前后，你在做什么？",
+    });
+
+    expect(result.finalResponse).toEqual(paraphrase);
+    expect(provider.requests.map((request) => request.schemaName)).toEqual([
+      "character_response", "character_response", "dialogue_guard",
+    ]);
+    expect(provider.requests[1]?.messages[1]?.content).toContain("repeated_response");
+    expect(provider.requests[2]?.messages[0]?.content).toContain("不改变含义的自然转述");
   });
 
   it("rejects an exact fact the selected character does not know before model review", async () => {
@@ -260,7 +312,7 @@ describe("dialogue graph", () => {
       },
     ]);
     const graph = createDialogueGraph(provider, { maxDraftAttempts: 1 });
-    const result = await graph.invoke(graphInput("command_dialogue_fact_leak"));
+    const result = await graph.invoke({ ...graphInput("command_dialogue_fact_leak"), playerText: "李闻舟当时说了什么？" });
 
     expect(result.finalResponse).toMatchObject({
       demeanor: "cooperative",
@@ -312,14 +364,14 @@ describe("dialogue graph", () => {
 });
 
 class ScriptedProvider implements StructuredModelProvider {
-  readonly requests: Array<{ schemaName: string }> = [];
+  readonly requests: Array<{ schemaName: string; messages: ModelMessage[] }> = [];
 
   constructor(private readonly responses: unknown[]) {}
 
   async invokeStructured<T extends Record<string, unknown>>(
     request: StructuredModelRequest<T>,
   ): Promise<StructuredModelResult<T>> {
-    this.requests.push({ schemaName: request.schemaName });
+    this.requests.push({ schemaName: request.schemaName, messages: request.messages });
     const response = this.responses.shift();
     if (response === undefined) throw new Error("No scripted model response remains");
 
@@ -349,7 +401,7 @@ function graphInput(commandId: string) {
 
 function safeCharacterResponse() {
   return {
-    utterance: "李闻舟主动接过茶盘，说由他送上楼。",
+    utterance: tutorialCase.evidence.find((evidence) => evidence.id === "evidence_housekeeper_testimony")!.discovery.dialogueUtterance!,
     demeanor: "cooperative" as const,
     disclosedClaimIds: ["claim_luo_tea"],
     memorySummary: "我告诉侦探，是李闻舟接走了茶盘。",

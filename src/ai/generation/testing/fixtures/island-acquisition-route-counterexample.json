@@ -1,0 +1,1001 @@
+{
+  "schemaVersion": 1,
+  "id": "live_island_proof_f838dbc7",
+  "seed": "live-island-proof-f838dbc7-a7bb-4b07-9e02-e316220b4471",
+  "title": "检修夜的海岛气象站",
+  "briefing": "昨夜台风外围过境，海岛气象站按计划进行设备检修。今晨六点，值班员在机房发现站长倒在地上，后脑有伤，已经死亡。站内还有三名检修人员和两名访客，均称昨晚在各自区域活动。警方登岛后封闭现场，需要查明谁在检修夜杀害了站长。",
+  "setting": {
+    "era": "contemporary",
+    "place": "近海小岛气象观测站",
+    "occurredAt": "2025-04-17T23:10:00+08:00"
+  },
+  "victimId": "character_victim",
+  "culpritId": "character_suspect_1",
+  "characters": [
+    {
+      "id": "character_victim",
+      "name": "周建国",
+      "roleTier": "victim",
+      "occupation": "气象站站长",
+      "publicProfile": "气象站站长，负责全站运行和检修安排。",
+      "privateProfile": "因发现设备采购回扣问题，准备向上级举报，被凶手灭口。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "middle",
+        "temperament": [
+          "严谨",
+          "固执"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_motive_1",
+          "fact_method_1",
+          "fact_opportunity_1"
+        ],
+        "evidenceIds": [],
+        "claimIds": []
+      },
+      "secretFactIds": [
+        "fact_motive_1"
+      ],
+      "lieRules": []
+    },
+    {
+      "id": "character_suspect_1",
+      "name": "陈海生",
+      "roleTier": "suspect",
+      "occupation": "设备检修员",
+      "publicProfile": "气象站设备检修员，负责机房传感器维护。",
+      "privateProfile": "因虚报采购价格被站长发现，担心败露而杀人。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "young",
+        "temperament": [
+          "沉默",
+          "谨慎"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_motive_1",
+          "fact_method_1",
+          "fact_opportunity_1"
+        ],
+        "evidenceIds": [
+          "evidence_phone_lock",
+          "evidence_work_log",
+          "evidence_blood_trace",
+          "evidence_toolbox",
+          "evidence_forensic_report"
+        ],
+        "claimIds": [
+          "claim_suspect_1_alibi"
+        ]
+      },
+      "secretFactIds": [
+        "fact_motive_1",
+        "fact_method_1",
+        "fact_opportunity_1"
+      ],
+      "lieRules": [
+        {
+          "factId": "fact_opportunity_1",
+          "strategy": "fabricate_cover",
+          "coverStatement": "我昨晚一直在宿舍，没有去过机房。"
+        }
+      ]
+    },
+    {
+      "id": "character_suspect_2",
+      "name": "林小梅",
+      "roleTier": "suspect",
+      "occupation": "气象观测员",
+      "publicProfile": "气象观测员，负责夜间数据记录。",
+      "privateProfile": "与站长有工作矛盾，但案发时在观测室有连续记录。",
+      "portraitTags": {
+        "gender": "female",
+        "ageGroup": "young",
+        "temperament": [
+          "细致",
+          "内向"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_alibi_2"
+        ],
+        "evidenceIds": [
+          "evidence_observation_log"
+        ],
+        "claimIds": [
+          "claim_suspect_2_alibi"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_suspect_3",
+      "name": "赵大勇",
+      "roleTier": "suspect",
+      "occupation": "后勤管理员",
+      "publicProfile": "后勤管理员，负责物资和车辆。",
+      "privateProfile": "案发时在码头卸货，有监控和证人。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "middle",
+        "temperament": [
+          "豪爽",
+          "急躁"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_alibi_3"
+        ],
+        "evidenceIds": [
+          "evidence_dock_camera"
+        ],
+        "claimIds": [
+          "claim_suspect_3_alibi"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_witness_1",
+      "name": "王秀兰",
+      "roleTier": "witness",
+      "occupation": "保洁员",
+      "publicProfile": "气象站保洁员，负责公共区域清洁。",
+      "privateProfile": "案发时在宿舍休息，听到走廊有脚步声。",
+      "portraitTags": {
+        "gender": "female",
+        "ageGroup": "senior",
+        "temperament": [
+          "热心",
+          "健谈"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_footstep"
+        ],
+        "evidenceIds": [
+          "evidence_footstep_testimony"
+        ],
+        "claimIds": [
+          "claim_witness_1_footstep"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_witness_2",
+      "name": "刘志强",
+      "roleTier": "witness",
+      "occupation": "维修工",
+      "publicProfile": "气象站维修工，负责水电维护。",
+      "privateProfile": "案发时在配电房值班，看到陈海生经过。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "middle",
+        "temperament": [
+          "稳重",
+          "寡言"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_sighting"
+        ],
+        "evidenceIds": [
+          "evidence_sighting_testimony"
+        ],
+        "claimIds": [
+          "claim_witness_2_sighting"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_witness_3",
+      "name": "孙晓芳",
+      "roleTier": "witness",
+      "occupation": "食堂厨师",
+      "publicProfile": "气象站食堂厨师，负责三餐。",
+      "privateProfile": "案发时在厨房准备早餐，听到争吵声。",
+      "portraitTags": {
+        "gender": "female",
+        "ageGroup": "middle",
+        "temperament": [
+          "直爽",
+          "敏感"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_argument"
+        ],
+        "evidenceIds": [
+          "evidence_argument_testimony"
+        ],
+        "claimIds": [
+          "claim_witness_3_argument"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene_machine_room",
+      "name": "机房",
+      "description": "机房是案发核心现场，设备指示灯闪烁，地面有散落工具和血迹。",
+      "initiallyUnlocked": true,
+      "objects": [
+        {
+          "id": "object_body",
+          "name": "尸体",
+          "description": "站长仰面倒地，后脑有明显伤口，身旁有一把带血的扳手。",
+          "actionAliases": [
+            "检查尸体",
+            "查看伤口"
+          ],
+          "evidenceIds": [
+            "evidence_body_wound"
+          ]
+        },
+        {
+          "id": "object_phone",
+          "name": "锁屏手机",
+          "description": "一部锁屏手机，屏幕有未接来电通知。",
+          "actionAliases": [
+            "查看手机",
+            "尝试解锁"
+          ],
+          "evidenceIds": [
+            "evidence_phone_lock"
+          ]
+        },
+        {
+          "id": "object_toolbox",
+          "name": "工具箱",
+          "description": "打开的金属工具箱，内部工具摆放凌乱，少了一把扳手。",
+          "actionAliases": [
+            "检查工具箱",
+            "清点工具"
+          ],
+          "evidenceIds": [
+            "evidence_toolbox"
+          ]
+        },
+        {
+          "id": "object_work_log",
+          "name": "检修日志",
+          "description": "摊开的检修日志，记录昨晚各时段检修任务。",
+          "actionAliases": [
+            "翻阅日志",
+            "查看记录"
+          ],
+          "evidenceIds": [
+            "evidence_work_log"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_observation_room",
+      "name": "观测室",
+      "description": "观测室位于二楼，仪器持续运行，桌上有观测记录本。",
+      "initiallyUnlocked": true,
+      "objects": [
+        {
+          "id": "object_observation_log",
+          "name": "观测记录本",
+          "description": "记录本上按小时填写气象数据，昨晚23点有林小梅的签名。",
+          "actionAliases": [
+            "查看记录本",
+            "核对签名"
+          ],
+          "evidenceIds": [
+            "evidence_observation_log"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_dormitory",
+      "name": "宿舍区",
+      "description": "宿舍区走廊安静，各房间门紧闭，墙上有监控摄像头。",
+      "initiallyUnlocked": true,
+      "objects": [
+        {
+          "id": "object_camera",
+          "name": "走廊监控",
+          "description": "监控摄像头对准走廊，指示灯正常。",
+          "actionAliases": [
+            "调取监控",
+            "查看录像"
+          ],
+          "evidenceIds": [
+            "evidence_corridor_camera"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_dock",
+      "name": "码头",
+      "description": "码头堆放着昨夜运来的物资，旁边有监控杆。",
+      "initiallyUnlocked": true,
+      "objects": [
+        {
+          "id": "object_dock_camera",
+          "name": "码头监控",
+          "description": "码头监控摄像头覆盖卸货区，可回放。",
+          "actionAliases": [
+            "调取码头监控",
+            "查看卸货录像"
+          ],
+          "evidenceIds": [
+            "evidence_dock_camera"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_kitchen",
+      "name": "厨房",
+      "description": "厨房整洁，灶台有使用痕迹，窗户朝向机房方向。",
+      "initiallyUnlocked": true,
+      "objects": [
+        {
+          "id": "object_kitchen_window",
+          "name": "厨房窗户",
+          "description": "窗户半开，可看到机房门口。",
+          "actionAliases": [
+            "查看窗外",
+            "观察机房方向"
+          ],
+          "evidenceIds": []
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact_motive_1",
+      "type": "motive",
+      "statement": "陈海生因虚报设备采购价格被站长发现，面临被举报和追责，有杀人动机。"
+    },
+    {
+      "id": "fact_method_1",
+      "type": "method",
+      "statement": "凶手用工具箱中的扳手从背后击打死者后脑，致其死亡。"
+    },
+    {
+      "id": "fact_opportunity_1",
+      "type": "opportunity",
+      "statement": "陈海生在案发时段出现在机房附近，有作案机会。"
+    },
+    {
+      "id": "fact_alibi_2",
+      "type": "alibi",
+      "statement": "林小梅在案发时段在观测室连续记录数据，有不在场证明。"
+    },
+    {
+      "id": "fact_alibi_3",
+      "type": "alibi",
+      "statement": "赵大勇在案发时段在码头卸货，有不在场证明。"
+    },
+    {
+      "id": "fact_footstep",
+      "type": "context",
+      "statement": "案发时段有人经过宿舍走廊，脚步声急促。"
+    },
+    {
+      "id": "fact_sighting",
+      "type": "context",
+      "statement": "案发时段刘志强在配电房看到陈海生经过。"
+    },
+    {
+      "id": "fact_argument",
+      "type": "context",
+      "statement": "案发前厨房方向传来争吵声。"
+    },
+    {
+      "id": "fact_victim_injury",
+      "type": "context",
+      "statement": "死者后脑有钝器伤，与扳手形状吻合。"
+    },
+    {
+      "id": "fact_blood_trace",
+      "type": "context",
+      "statement": "扳手上有少量血迹。"
+    },
+    {
+      "id": "fact_phone_record",
+      "type": "context",
+      "statement": "死者手机在案发时段有未接来电，来自陈海生。"
+    },
+    {
+      "id": "fact_work_log_entry",
+      "type": "context",
+      "statement": "检修日志显示陈海生负责机房设备检修，案发时段应在机房。"
+    },
+    {
+      "id": "fact_forensic_match",
+      "type": "context",
+      "statement": "扳手上的血迹与死者DNA匹配，且伤口形态与扳手一致。"
+    }
+  ],
+  "timeline": [
+    {
+      "id": "event_1",
+      "timestamp": "2025-04-17T22:00:00+08:00",
+      "sceneId": "scene_machine_room",
+      "characterIds": [
+        "character_victim",
+        "character_suspect_1"
+      ],
+      "factIds": [
+        "fact_work_log_entry"
+      ],
+      "description": "陈海生按计划到机房检修设备，与站长碰面。"
+    },
+    {
+      "id": "event_2",
+      "timestamp": "2025-04-17T23:10:00+08:00",
+      "sceneId": "scene_machine_room",
+      "characterIds": [
+        "character_victim",
+        "character_suspect_1"
+      ],
+      "factIds": [
+        "fact_method_1",
+        "fact_opportunity_1"
+      ],
+      "description": "陈海生在机房用扳手从背后击打站长后脑，致其死亡。"
+    },
+    {
+      "id": "event_3",
+      "timestamp": "2025-04-17T23:15:00+08:00",
+      "sceneId": "scene_dormitory",
+      "characterIds": [
+        "character_witness_1"
+      ],
+      "factIds": [
+        "fact_footstep"
+      ],
+      "description": "王秀兰听到走廊有急促脚步声。"
+    },
+    {
+      "id": "event_4",
+      "timestamp": "2025-04-17T23:05:00+08:00",
+      "sceneId": "scene_kitchen",
+      "characterIds": [
+        "character_witness_3"
+      ],
+      "factIds": [
+        "fact_argument"
+      ],
+      "description": "孙晓芳在厨房听到机房方向传来争吵声。"
+    },
+    {
+      "id": "event_5",
+      "timestamp": "2025-04-17T23:00:00+08:00",
+      "sceneId": "scene_observation_room",
+      "characterIds": [
+        "character_suspect_2"
+      ],
+      "factIds": [
+        "fact_alibi_2"
+      ],
+      "description": "林小梅在观测室记录数据，签名确认。"
+    },
+    {
+      "id": "event_6",
+      "timestamp": "2025-04-17T23:00:00+08:00",
+      "sceneId": "scene_dock",
+      "characterIds": [
+        "character_suspect_3"
+      ],
+      "factIds": [
+        "fact_alibi_3"
+      ],
+      "description": "赵大勇在码头卸货，监控记录。"
+    },
+    {
+      "id": "event_7",
+      "timestamp": "2025-04-17T23:08:00+08:00",
+      "sceneId": "scene_dormitory",
+      "characterIds": [
+        "character_witness_2"
+      ],
+      "factIds": [
+        "fact_sighting"
+      ],
+      "description": "刘志强在配电房看到陈海生经过。"
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim_suspect_1_alibi",
+      "speakerId": "character_suspect_1",
+      "kind": "lie",
+      "statement": "我昨晚一直在宿舍，没有去过机房。",
+      "factIds": [
+        "fact_opportunity_1"
+      ]
+    },
+    {
+      "id": "claim_suspect_2_alibi",
+      "speakerId": "character_suspect_2",
+      "kind": "truth",
+      "statement": "我昨晚23点在观测室记录数据，有签名。",
+      "factIds": [
+        "fact_alibi_2"
+      ]
+    },
+    {
+      "id": "claim_suspect_3_alibi",
+      "speakerId": "character_suspect_3",
+      "kind": "truth",
+      "statement": "我昨晚在码头卸货，有监控。",
+      "factIds": [
+        "fact_alibi_3"
+      ]
+    },
+    {
+      "id": "claim_witness_1_footstep",
+      "speakerId": "character_witness_1",
+      "kind": "truth",
+      "statement": "我听到走廊有脚步声，很急促。",
+      "factIds": [
+        "fact_footstep"
+      ]
+    },
+    {
+      "id": "claim_witness_2_sighting",
+      "speakerId": "character_witness_2",
+      "kind": "truth",
+      "statement": "我看到陈海生从配电房门口经过。",
+      "factIds": [
+        "fact_sighting"
+      ]
+    },
+    {
+      "id": "claim_witness_3_argument",
+      "speakerId": "character_witness_3",
+      "kind": "truth",
+      "statement": "我听到机房方向有争吵声。",
+      "factIds": [
+        "fact_argument"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence_body_wound",
+      "name": "尸体伤口",
+      "description": "死者后脑有凹陷性骨折，伤口边缘有金属碎屑。",
+      "kind": "forensic",
+      "supportsFactIds": [
+        "fact_victim_injury"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_machine_room",
+        "objectId": "object_body",
+        "actionAliases": [
+          "检查尸体",
+          "查看伤口"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_phone_lock",
+      "name": "锁屏手机",
+      "description": "手机锁屏，显示未接来电来自陈海生，时间23:05。",
+      "kind": "digital",
+      "supportsFactIds": [
+        "fact_phone_record"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [
+        "character_suspect_1"
+      ],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_machine_room",
+        "objectId": "object_phone",
+        "actionAliases": [
+          "查看手机",
+          "尝试解锁"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_toolbox",
+      "name": "工具箱",
+      "description": "工具箱内缺少一把扳手，其他工具整齐。",
+      "kind": "physical",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_machine_room",
+        "objectId": "object_toolbox",
+        "actionAliases": [
+          "检查工具箱",
+          "清点工具"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_work_log",
+      "name": "检修日志",
+      "description": "日志显示陈海生负责机房设备检修，23:00-23:30在机房。",
+      "kind": "document",
+      "supportsFactIds": [
+        "fact_work_log_entry"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [
+        "character_suspect_1"
+      ],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_machine_room",
+        "objectId": "object_work_log",
+        "actionAliases": [
+          "翻阅日志",
+          "查看记录"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_observation_log",
+      "name": "观测记录本",
+      "description": "记录本显示林小梅在23:00签名确认数据，笔迹连续。",
+      "kind": "document",
+      "supportsFactIds": [
+        "fact_alibi_2"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [
+        "character_suspect_2"
+      ],
+      "critical": true,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_observation_room",
+        "objectId": "object_observation_log",
+        "actionAliases": [
+          "查看记录本",
+          "核对签名"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_corridor_camera",
+      "name": "走廊监控",
+      "description": "监控显示23:10-23:20陈海生经过走廊，走向机房方向。",
+      "kind": "digital",
+      "supportsFactIds": [
+        "fact_opportunity_1"
+      ],
+      "contradictsClaimIds": [
+        "claim_suspect_1_alibi"
+      ],
+      "implicatesCharacterIds": [
+        "character_suspect_1"
+      ],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "query",
+        "sceneId": "scene_dormitory",
+        "objectId": "object_camera",
+        "actionAliases": [
+          "调取监控",
+          "查看录像"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_dock_camera",
+      "name": "码头监控",
+      "description": "监控显示赵大勇从22:50到23:30一直在码头卸货，未离开。",
+      "kind": "digital",
+      "supportsFactIds": [
+        "fact_alibi_3"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [
+        "character_suspect_3"
+      ],
+      "critical": true,
+      "discovery": {
+        "method": "query",
+        "sceneId": "scene_dock",
+        "objectId": "object_dock_camera",
+        "actionAliases": [
+          "调取码头监控",
+          "查看卸货录像"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_footstep_testimony",
+      "name": "王秀兰的证词",
+      "description": "王秀兰称23:15听到走廊有急促脚步声，但未看到人。",
+      "kind": "testimony",
+      "supportsFactIds": [
+        "fact_footstep"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_dormitory",
+        "characterId": "character_witness_1",
+        "actionAliases": [
+          "询问王秀兰",
+          "了解昨晚情况"
+        ],
+        "dialogueAliases": [
+          "你昨晚听到什么？",
+          "有没有异常声音？",
+          "能说说脚步声吗？"
+        ],
+        "dialogueUtterance": "我昨晚在宿舍，23点15分左右听到走廊有脚步声，很急促，但没敢开门看。",
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_sighting_testimony",
+      "name": "刘志强的证词",
+      "description": "刘志强称23:08在配电房看到陈海生经过，走向机房。",
+      "kind": "testimony",
+      "supportsFactIds": [
+        "fact_sighting"
+      ],
+      "contradictsClaimIds": [
+        "claim_suspect_1_alibi"
+      ],
+      "implicatesCharacterIds": [
+        "character_suspect_1"
+      ],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_dormitory",
+        "characterId": "character_witness_2",
+        "actionAliases": [
+          "询问刘志强",
+          "了解昨晚见闻"
+        ],
+        "dialogueAliases": [
+          "你昨晚看到谁了？",
+          "有没有人经过？",
+          "能描述一下吗？"
+        ],
+        "dialogueUtterance": "我昨晚在配电房值班，23点08分看到陈海生从门口经过，往机房方向去了。",
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_argument_testimony",
+      "name": "孙晓芳的证词",
+      "description": "孙晓芳称23:05听到机房方向有争吵声。",
+      "kind": "testimony",
+      "supportsFactIds": [
+        "fact_argument"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_kitchen",
+        "characterId": "character_witness_3",
+        "actionAliases": [
+          "询问孙晓芳",
+          "了解争吵声"
+        ],
+        "dialogueAliases": [
+          "你昨晚听到什么？",
+          "有没有争吵？",
+          "声音从哪里来？"
+        ],
+        "dialogueUtterance": "我昨晚在厨房准备早餐，23点05分听到机房方向有争吵声，像是站长和谁在吵。",
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_blood_trace",
+      "name": "扳手血迹",
+      "description": "扳手上有少量血迹，需进一步检验。",
+      "kind": "forensic",
+      "supportsFactIds": [
+        "fact_blood_trace"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "analyze",
+        "sceneId": "scene_machine_room",
+        "objectId": "object_toolbox",
+        "actionAliases": [
+          "检验血迹",
+          "提取样本"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_toolbox"
+        ]
+      }
+    },
+    {
+      "id": "evidence_forensic_report",
+      "name": "法医检验报告",
+      "description": "报告确认扳手血迹与死者DNA匹配，伤口形态与扳手一致，为致死凶器。",
+      "kind": "forensic",
+      "supportsFactIds": [
+        "fact_method_1",
+        "fact_forensic_match"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "analyze",
+        "sceneId": "scene_machine_room",
+        "objectId": "object_body",
+        "actionAliases": [
+          "进行法医检验",
+          "比对凶器"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_body_wound",
+          "evidence_blood_trace"
+        ]
+      }
+    },
+    {
+      "id": "evidence_motive_document",
+      "name": "采购回扣记录",
+      "description": "在陈海生宿舍找到的采购单据，显示虚报价格，站长批注要求说明。",
+      "kind": "document",
+      "supportsFactIds": [
+        "fact_motive_1"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [
+        "character_suspect_1"
+      ],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "search",
+        "sceneId": "scene_dormitory",
+        "objectId": "object_camera",
+        "actionAliases": [
+          "搜查宿舍",
+          "查找单据"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_corridor_camera"
+        ]
+      }
+    }
+  ],
+  "unlockRules": [
+    {
+      "id": "unlock_1",
+      "targetType": "evidence",
+      "targetId": "evidence_blood_trace",
+      "allEvidenceIds": [
+        "evidence_toolbox"
+      ],
+      "anyEvidenceIds": []
+    },
+    {
+      "id": "unlock_2",
+      "targetType": "evidence",
+      "targetId": "evidence_forensic_report",
+      "allEvidenceIds": [
+        "evidence_body_wound",
+        "evidence_blood_trace"
+      ],
+      "anyEvidenceIds": []
+    },
+    {
+      "id": "unlock_3",
+      "targetType": "evidence",
+      "targetId": "evidence_motive_document",
+      "allEvidenceIds": [
+        "evidence_corridor_camera"
+      ],
+      "anyEvidenceIds": []
+    }
+  ],
+  "hintChains": [
+    {
+      "id": "hint_1",
+      "targetFactId": "fact_motive_1",
+      "hints": [
+        "检查死者手机和检修日志，看看谁与死者有工作交集。",
+        "陈海生负责机房检修，但他说没去过机房，需要核实。",
+        "搜查陈海生宿舍，寻找采购单据或财务记录。"
+      ]
+    },
+    {
+      "id": "hint_2",
+      "targetFactId": "fact_method_1",
+      "hints": [
+        "尸体伤口显示钝器伤，凶器可能是工具箱里的扳手。",
+        "工具箱少了一把扳手，需要找到并检验。",
+        "对扳手进行血迹和DNA比对，确认凶器。"
+      ]
+    },
+    {
+      "id": "hint_3",
+      "targetFactId": "fact_opportunity_1",
+      "hints": [
+        "查看走廊监控，确认案发时段谁经过。",
+        "刘志强可能看到有人经过配电房。",
+        "结合监控和证词，锁定陈海生在案发时段出现在机房附近。"
+      ]
+    }
+  ],
+  "solution": {
+    "culpritId": "character_suspect_1",
+    "motiveFactId": "fact_motive_1",
+    "methodFactId": "fact_method_1",
+    "requiredEvidenceIds": [
+      "evidence_observation_log",
+      "evidence_dock_camera",
+      "evidence_corridor_camera",
+      "evidence_sighting_testimony",
+      "evidence_forensic_report",
+      "evidence_motive_document"
+    ],
+    "requiredTimelineEventIds": [
+      "event_2"
+    ]
+  }
+}

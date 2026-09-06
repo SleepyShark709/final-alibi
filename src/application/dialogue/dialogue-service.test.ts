@@ -48,15 +48,19 @@ describe("DialogueService", () => {
       sessionId: "game_dialogue_service",
       source: "tutorial",
     });
+    const testimony = tutorialCase.evidence.find((evidence) => evidence.id === "evidence_housekeeper_testimony")!.discovery.dialogueUtterance!;
     const provider = new ScriptedProvider([
       {
-        utterance: "李闻舟接过茶盘，说由他送去书房。",
+        utterance: testimony,
         demeanor: "cooperative",
         disclosedClaimIds: ["claim_luo_tea"],
         memorySummary: "我已经说明李闻舟拿走茶盘。",
         stateDelta: { trust: 3, pressure: 1, alertness: 0 },
       },
-      { safe: true, violationCodes: [], feedback: "" },
+      { safe: true, violationCodes: [], feedback: "", groundingChecks: [{
+        candidateText: testimony,
+        sourceText: testimony,
+      }] },
     ]);
     const service = new DialogueService(repository, provider, new MemorySaver());
     const input = {

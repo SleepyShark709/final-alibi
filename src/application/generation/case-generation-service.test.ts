@@ -5,6 +5,11 @@ import path from "node:path";
 import { MemorySaver } from "@langchain/langgraph";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ScriptedBlindProtocol } from "@/ai/generation/testing/scripted-blind-protocol";
+import { scriptEvidenceReview } from "@/ai/generation/testing/scripted-evidence-review";
+import { buildEvidenceReviewBatches } from "@/ai/generation/evidence-review-batches";
+import { buildEvidenceReviewPlan } from "@/ai/generation/evidence-review";
+
 import type {
   StructuredModelProvider,
   StructuredModelRequest,
@@ -86,7 +91,7 @@ describe("CaseGenerationService", () => {
         estimatedCostMicrosCny: expect.any(Number),
       },
       caseIds: ["case_service_generated"],
-      modelNodes: ["case_draft", "blind_solve"],
+      modelNodes: ["case_draft", "opening_review", ...buildEvidenceReviewBatches(buildEvidenceReviewPlan(artifact)).map(() => "evidence_review"), "blind_solve"],
     });
     expect(job.result?.estimatedCostMicrosCny).toEqual(expect.any(Number));
     expect(Number(job.result?.estimatedCostMicrosCny)).toBeGreaterThan(0);
@@ -146,9 +151,7 @@ describe("CaseGenerationService", () => {
     invalid.scenes = invalid.scenes.slice(0, 2);
     const provider = new ScriptedProvider([
       invalid,
-      { title: valid.title },
-      { title: valid.title },
-      { title: valid.title },
+      ...Array.from({ length: 5 }, () => ({ title: valid.title })),
       valid,
       {
         culpritId: valid.culpritId,
@@ -200,12 +203,16 @@ describe("CaseGenerationService", () => {
 });
 
 class ScriptedProvider implements StructuredModelProvider {
+  private readonly blindProtocol = new ScriptedBlindProtocol();
   constructor(private readonly responses: unknown[]) {}
 
   async invokeStructured<T extends Record<string, unknown>>(
     request: StructuredModelRequest<T>,
   ): Promise<StructuredModelResult<T>> {
-    const response = this.responses.shift();
+    const scripted = request.schemaName === "case_opening_review" || request.schemaName === "case_evidence_review"
+      ? { issues: [] }
+      : this.responses.shift();
+    const response = this.blindProtocol.reply(request, scriptEvidenceReview(request, scripted));
     if (response === undefined) throw new Error("No scripted response remains");
     return {
       value: request.schema.parse(response),

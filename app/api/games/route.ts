@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireAccess } from "@/server/access";
 import { jsonError } from "@/server/http-error";
+import { createPlayerProtocol } from "@/server/player-protocol";
 import { requireAnonymousPlayer } from "@/server/player-session";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getServerServices } from "@/server/services";
@@ -26,7 +27,8 @@ export async function POST(request: Request) {
     });
     const input = createGameSchema.parse(await request.json());
     const view = await services.game.startGame(playerId, input.caseId);
-    return NextResponse.json({ view }, { status: 201 });
+    const game = await services.repository.loadGame(playerId, view.session.id);
+    return NextResponse.json(createPlayerProtocol(game.caseArtifact, game.session, await services.repository.getPlayerProtocolKey()).encode({ view }), { status: 201 });
   } catch (error) {
     return jsonError(error);
   }

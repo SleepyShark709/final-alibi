@@ -1,0 +1,935 @@
+{
+  "draft": {
+    "schemaVersion": 1,
+    "id": "case_rain_theater_4e4444fa",
+    "seed": "live-final-3-4e4444fa-2049-4d7d-be90-5c3975f05088",
+    "title": "雨夜散场后的社区剧场",
+    "briefing": "周六晚社区剧场演出结束后，清洁员在后台走廊发现票务主管陈慧倒在血泊中。当晚有三人因不同理由滞留在剧场：负责灯光的技术员、临时帮忙的志愿者、以及来取遗落物品的退休教师。剧场外正下着大雨，警方到场时后台监控主机已被水浸坏，但现场仍留下若干待查痕迹。",
+    "setting": {
+      "era": "contemporary",
+      "place": "城西社区剧场",
+      "occurredAt": "2025-04-12T21:40:00+08:00"
+    },
+    "victimId": "character_chen_hui",
+    "culpritId": "character_zhou_ming",
+    "characters": [
+      {
+        "id": "character_chen_hui",
+        "name": "陈慧",
+        "roleTier": "victim",
+        "occupation": "社区剧场票务主管",
+        "publicProfile": "负责剧场票务、场租和临时工结算，当晚演出结束后在后台走廊被发现死亡。",
+        "privateProfile": "长期私下截留部分场租现金，并拖欠多名临时工报酬。",
+        "portraitTags": {
+          "gender": "female",
+          "ageGroup": "middle",
+          "temperament": [
+            "精明",
+            "强势"
+          ]
+        },
+        "knowledge": {
+          "factIds": [],
+          "evidenceIds": [],
+          "claimIds": []
+        },
+        "secretFactIds": [],
+        "lieRules": []
+      },
+      {
+        "id": "character_zhou_ming",
+        "name": "周明",
+        "roleTier": "suspect",
+        "occupation": "剧场灯光技术员",
+        "publicProfile": "负责演出灯光和后台设备维护，当晚演出结束后说自己在灯光控制室整理设备。",
+        "privateProfile": "因陈慧长期克扣其灯光外包费并威胁换人，在后台走廊用镇纸从后方击打陈慧致死。",
+        "portraitTags": {
+          "gender": "male",
+          "ageGroup": "young",
+          "temperament": [
+            "内向",
+            "隐忍"
+          ]
+        },
+        "knowledge": {
+          "factIds": [
+            "fact_motive_zhou",
+            "fact_method_blunt",
+            "fact_opportunity_zhou",
+            "fact_identity_zhou"
+          ],
+          "evidenceIds": [
+            "evidence_ledger_photo",
+            "evidence_phone_lock",
+            "evidence_metal_fragment",
+            "evidence_raincoat_log",
+            "evidence_zhou_testimony"
+          ],
+          "claimIds": [
+            "claim_zhou_alibi"
+          ]
+        },
+        "secretFactIds": [
+          "fact_motive_zhou",
+          "fact_identity_zhou"
+        ],
+        "lieRules": [
+          {
+            "factId": "fact_opportunity_zhou",
+            "strategy": "fabricate_cover",
+            "coverStatement": "我一直在灯光控制室，没有去过走廊。"
+          }
+        ]
+      },
+      {
+        "id": "character_liu_yuan",
+        "name": "刘媛",
+        "roleTier": "suspect",
+        "occupation": "社区志愿者",
+        "publicProfile": "当晚帮忙引导观众散场，演出结束后说自己在票务办公室整理观众遗落物品。",
+        "privateProfile": "因陈慧拒绝支付其垫付的服装费，曾与陈慧发生争吵，但案发时在票务办公室有连续监控覆盖。",
+        "portraitTags": {
+          "gender": "female",
+          "ageGroup": "young",
+          "temperament": [
+            "热心",
+            "直率"
+          ]
+        },
+        "knowledge": {
+          "factIds": [
+            "fact_alibi_liu",
+            "fact_relationship_liu_chen"
+          ],
+          "evidenceIds": [
+            "evidence_liu_testimony",
+            "evidence_office_camera"
+          ],
+          "claimIds": [
+            "claim_liu_alibi"
+          ]
+        },
+        "secretFactIds": [
+          "fact_relationship_liu_chen"
+        ],
+        "lieRules": []
+      },
+      {
+        "id": "character_wang_jianguo",
+        "name": "王建国",
+        "roleTier": "suspect",
+        "occupation": "退休教师",
+        "publicProfile": "当晚回剧场取遗落的保温杯，说自己在后台走廊附近停留过。",
+        "privateProfile": "因陈慧拒绝退还其垫付的场租押金而心生不满，但案发时在剧场门卫室有签收快递记录。",
+        "portraitTags": {
+          "gender": "male",
+          "ageGroup": "senior",
+          "temperament": [
+            "温和",
+            "谨慎"
+          ]
+        },
+        "knowledge": {
+          "factIds": [
+            "fact_alibi_wang",
+            "fact_relationship_wang_chen"
+          ],
+          "evidenceIds": [
+            "evidence_wang_testimony",
+            "evidence_delivery_log"
+          ],
+          "claimIds": [
+            "claim_wang_alibi"
+          ]
+        },
+        "secretFactIds": [
+          "fact_relationship_wang_chen"
+        ],
+        "lieRules": []
+      },
+      {
+        "id": "character_sun_li",
+        "name": "孙丽",
+        "roleTier": "witness",
+        "occupation": "剧场清洁员",
+        "publicProfile": "负责后台清洁，当晚第一个发现陈慧尸体并报警。",
+        "privateProfile": "案发前在后台走廊看到周明从走廊西侧快步离开，但未看清其手中物品。",
+        "portraitTags": {
+          "gender": "female",
+          "ageGroup": "middle",
+          "temperament": [
+            "细心",
+            "胆小"
+          ]
+        },
+        "knowledge": {
+          "factIds": [
+            "fact_opportunity_zhou",
+            "fact_identity_zhou"
+          ],
+          "evidenceIds": [
+            "evidence_sun_testimony"
+          ],
+          "claimIds": [
+            "claim_sun_saw_zhou"
+          ]
+        },
+        "secretFactIds": [],
+        "lieRules": []
+      }
+    ],
+    "scenes": [
+      {
+        "id": "scene_backstage_corridor",
+        "name": "后台走廊",
+        "description": "狭窄的走廊连接化妆间和票务办公室，地面有湿滑鞋印，墙角堆着几个旧戏箱。",
+        "initiallyUnlocked": true,
+        "objects": [
+          {
+            "id": "object_body",
+            "name": "陈慧的尸体",
+            "description": "尸体俯卧在走廊中部，后脑有明显钝器伤，身旁有一部屏幕碎裂的手机。",
+            "actionAliases": [
+              "检查尸体",
+              "查看伤口",
+              "观察手机"
+            ],
+            "evidenceIds": [
+              "evidence_wound_pattern",
+              "evidence_phone_lock"
+            ]
+          },
+          {
+            "id": "object_corridor_floor",
+            "name": "走廊地面",
+            "description": "地面有水渍和几处模糊鞋印，靠近墙边有一小片金属碎屑。",
+            "actionAliases": [
+              "检查地面",
+              "查看鞋印",
+              "收集碎屑"
+            ],
+            "evidenceIds": [
+              "evidence_metal_fragment"
+            ]
+          },
+          {
+            "id": "object_old_trunk",
+            "name": "旧戏箱",
+            "description": "墙角旧戏箱上放着一件深色雨衣，雨衣下摆沾有泥水。",
+            "actionAliases": [
+              "检查戏箱",
+              "查看雨衣"
+            ],
+            "evidenceIds": [
+              "evidence_raincoat_log"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "scene_lighting_control",
+        "name": "灯光控制室",
+        "description": "狭小控制室堆满线路和灯具，控制台旁有一个工具柜，门后挂着工作服。",
+        "initiallyUnlocked": false,
+        "objects": [
+          {
+            "id": "object_tool_cabinet",
+            "name": "工具柜",
+            "description": "工具柜上层放着备用灯泡和工具，下层有一本翻开的设备维护记录。",
+            "actionAliases": [
+              "检查工具柜",
+              "查看维护记录"
+            ],
+            "evidenceIds": [
+              "evidence_maintenance_log"
+            ]
+          },
+          {
+            "id": "object_work_jacket",
+            "name": "工作服",
+            "description": "门后挂着一件深蓝色工作服，袖口有暗色污渍。",
+            "actionAliases": [
+              "检查工作服",
+              "查看袖口"
+            ],
+            "evidenceIds": [
+              "evidence_jacket_stain"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "scene_ticket_office",
+        "name": "票务办公室",
+        "description": "办公室内文件散乱，桌上有一台监控显示器，角落有保险柜和饮水机。",
+        "initiallyUnlocked": false,
+        "objects": [
+          {
+            "id": "object_monitor",
+            "name": "监控显示器",
+            "description": "显示器连接后台监控，画面显示票务办公室内连续录像。",
+            "actionAliases": [
+              "查看监控",
+              "回放录像"
+            ],
+            "evidenceIds": [
+              "evidence_office_camera"
+            ]
+          },
+          {
+            "id": "object_safe",
+            "name": "保险柜",
+            "description": "保险柜半开，里面有几本账册和一个U盘。",
+            "actionAliases": [
+              "检查保险柜",
+              "查看账册",
+              "读取U盘"
+            ],
+            "evidenceIds": [
+              "evidence_ledger_photo"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "scene_guard_room",
+        "name": "门卫室",
+        "description": "门卫室靠近剧场大门，桌上有一台快递签收终端和访客登记本。",
+        "initiallyUnlocked": false,
+        "objects": [
+          {
+            "id": "object_delivery_terminal",
+            "name": "快递签收终端",
+            "description": "终端显示当晚的快递签收记录，包含时间和签收人。",
+            "actionAliases": [
+              "查询签收记录",
+              "查看终端"
+            ],
+            "evidenceIds": [
+              "evidence_delivery_log"
+            ]
+          }
+        ]
+      }
+    ],
+    "facts": [
+      {
+        "id": "fact_identity_zhou",
+        "type": "identity",
+        "statement": "周明是本案凶手。"
+      },
+      {
+        "id": "fact_motive_zhou",
+        "type": "motive",
+        "statement": "周明因陈慧长期克扣其灯光外包费并威胁换人而怀恨。"
+      },
+      {
+        "id": "fact_method_blunt",
+        "type": "method",
+        "statement": "陈慧被钝器从后方击打后脑致死。"
+      },
+      {
+        "id": "fact_opportunity_zhou",
+        "type": "opportunity",
+        "statement": "周明在案发时间出现在后台走廊。"
+      },
+      {
+        "id": "fact_alibi_liu",
+        "type": "alibi",
+        "statement": "刘媛在案发时间位于票务办公室。"
+      },
+      {
+        "id": "fact_alibi_wang",
+        "type": "alibi",
+        "statement": "王建国在案发时间位于门卫室。"
+      },
+      {
+        "id": "fact_relationship_liu_chen",
+        "type": "relationship",
+        "statement": "刘媛曾因服装费与陈慧发生争吵。"
+      },
+      {
+        "id": "fact_relationship_wang_chen",
+        "type": "relationship",
+        "statement": "王建国曾因场租押金与陈慧发生纠纷。"
+      },
+      {
+        "id": "fact_raincoat_owner",
+        "type": "context",
+        "statement": "深色雨衣属于周明。"
+      }
+    ],
+    "timeline": [
+      {
+        "id": "event_show_ends",
+        "timestamp": "2025-04-12T21:10:00+08:00",
+        "sceneId": "scene_backstage_corridor",
+        "characterIds": [
+          "character_chen_hui",
+          "character_zhou_ming",
+          "character_liu_yuan",
+          "character_wang_jianguo"
+        ],
+        "factIds": [],
+        "description": "演出结束，众人各自散去或滞留。"
+      },
+      {
+        "id": "event_murder",
+        "timestamp": "2025-04-12T21:40:00+08:00",
+        "sceneId": "scene_backstage_corridor",
+        "characterIds": [
+          "character_chen_hui",
+          "character_zhou_ming"
+        ],
+        "factIds": [
+          "fact_opportunity_zhou",
+          "fact_method_blunt"
+        ],
+        "description": "陈慧在后台走廊被周明用镇纸击打后脑致死。"
+      },
+      {
+        "id": "event_body_found",
+        "timestamp": "2025-04-12T22:05:00+08:00",
+        "sceneId": "scene_backstage_corridor",
+        "characterIds": [
+          "character_sun_li"
+        ],
+        "factIds": [],
+        "description": "清洁员孙丽发现尸体并报警。"
+      }
+    ],
+    "claims": [
+      {
+        "id": "claim_zhou_alibi",
+        "speakerId": "character_zhou_ming",
+        "kind": "lie",
+        "statement": "我一直在灯光控制室，没有去过走廊。",
+        "factIds": [
+          "fact_opportunity_zhou"
+        ]
+      },
+      {
+        "id": "claim_liu_alibi",
+        "speakerId": "character_liu_yuan",
+        "kind": "truth",
+        "statement": "我一直在票务办公室整理遗落物品。",
+        "factIds": [
+          "fact_alibi_liu"
+        ]
+      },
+      {
+        "id": "claim_wang_alibi",
+        "speakerId": "character_wang_jianguo",
+        "kind": "truth",
+        "statement": "我在门卫室签收快递，没有去后台。",
+        "factIds": [
+          "fact_alibi_wang"
+        ]
+      },
+      {
+        "id": "claim_sun_saw_zhou",
+        "speakerId": "character_sun_li",
+        "kind": "truth",
+        "statement": "我看到周明从走廊西侧快步离开。",
+        "factIds": [
+          "fact_opportunity_zhou",
+          "fact_identity_zhou"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "evidence_wound_pattern",
+        "name": "后脑钝器伤",
+        "description": "尸体后脑有一处弧形挫裂伤，边缘有金属碎屑残留，符合钝器打击特征。",
+        "kind": "forensic",
+        "supportsFactIds": [
+          "fact_method_blunt"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "inspect",
+          "sceneId": "scene_backstage_corridor",
+          "objectId": "object_body",
+          "actionAliases": [
+            "检查伤口",
+            "查看钝器伤"
+          ],
+          "prerequisiteEvidenceIds": []
+        }
+      },
+      {
+        "id": "evidence_phone_lock",
+        "name": "碎裂手机",
+        "description": "手机屏幕碎裂但未解锁，显示有一条未读消息，内容为周明发送的催款信息。",
+        "kind": "digital",
+        "supportsFactIds": [
+          "fact_motive_zhou"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [
+          "character_zhou_ming"
+        ],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "inspect",
+          "sceneId": "scene_backstage_corridor",
+          "objectId": "object_body",
+          "actionAliases": [
+            "查看手机",
+            "读取消息"
+          ],
+          "prerequisiteEvidenceIds": []
+        }
+      },
+      {
+        "id": "evidence_metal_fragment",
+        "name": "金属碎屑",
+        "description": "走廊地面发现一小片金属碎屑，与尸体伤口处残留物成分一致。",
+        "kind": "forensic",
+        "supportsFactIds": [
+          "fact_method_blunt"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "search",
+          "sceneId": "scene_backstage_corridor",
+          "objectId": "object_corridor_floor",
+          "actionAliases": [
+            "收集碎屑",
+            "检查地面"
+          ],
+          "prerequisiteEvidenceIds": []
+        }
+      },
+      {
+        "id": "evidence_raincoat_log",
+        "name": "深色雨衣",
+        "description": "旧戏箱上的深色雨衣内袋有一张灯光设备领用单，领用人签名是周明。",
+        "kind": "physical",
+        "supportsFactIds": [
+          "fact_raincoat_owner"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [
+          "character_zhou_ming"
+        ],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "search",
+          "sceneId": "scene_backstage_corridor",
+          "objectId": "object_old_trunk",
+          "actionAliases": [
+            "检查雨衣",
+            "翻找内袋"
+          ],
+          "prerequisiteEvidenceIds": []
+        }
+      },
+      {
+        "id": "evidence_maintenance_log",
+        "name": "设备维护记录",
+        "description": "灯光控制室维护记录显示周明在案发前曾借用镇纸作为临时压线工具，但未归还。",
+        "kind": "document",
+        "supportsFactIds": [
+          "fact_method_blunt"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [
+          "character_zhou_ming"
+        ],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "search",
+          "sceneId": "scene_lighting_control",
+          "objectId": "object_tool_cabinet",
+          "actionAliases": [
+            "查看维护记录",
+            "翻阅记录本"
+          ],
+          "prerequisiteEvidenceIds": [
+            "evidence_raincoat_log"
+          ]
+        }
+      },
+      {
+        "id": "evidence_jacket_stain",
+        "name": "工作服污渍",
+        "description": "周明工作服袖口有暗色污渍，经检验为陈慧血迹。",
+        "kind": "forensic",
+        "supportsFactIds": [
+          "fact_identity_zhou"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [
+          "character_zhou_ming"
+        ],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "analyze",
+          "sceneId": "scene_lighting_control",
+          "objectId": "object_work_jacket",
+          "actionAliases": [
+            "检验污渍",
+            "分析血迹"
+          ],
+          "prerequisiteEvidenceIds": [
+            "evidence_wound_pattern"
+          ]
+        }
+      },
+      {
+        "id": "evidence_office_camera",
+        "name": "票务办公室监控",
+        "description": "监控显示刘媛从21:20至22:00一直在票务办公室内整理物品，未离开。",
+        "kind": "digital",
+        "supportsFactIds": [
+          "fact_alibi_liu"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [],
+        "excludesCharacterIds": [
+          "character_liu_yuan"
+        ],
+        "critical": true,
+        "discovery": {
+          "method": "query",
+          "sceneId": "scene_ticket_office",
+          "objectId": "object_monitor",
+          "actionAliases": [
+            "查看监控",
+            "回放录像"
+          ],
+          "prerequisiteEvidenceIds": [
+            "evidence_phone_lock"
+          ]
+        }
+      },
+      {
+        "id": "evidence_delivery_log",
+        "name": "快递签收记录",
+        "description": "门卫室终端显示王建国于21:30签收快递，并有门卫确认其一直在门卫室至22:00。",
+        "kind": "digital",
+        "supportsFactIds": [
+          "fact_alibi_wang"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [],
+        "excludesCharacterIds": [
+          "character_wang_jianguo"
+        ],
+        "critical": true,
+        "discovery": {
+          "method": "query",
+          "sceneId": "scene_guard_room",
+          "objectId": "object_delivery_terminal",
+          "actionAliases": [
+            "查询签收记录",
+            "查看终端"
+          ],
+          "prerequisiteEvidenceIds": [
+            "evidence_phone_lock"
+          ]
+        }
+      },
+      {
+        "id": "evidence_ledger_photo",
+        "name": "账册照片",
+        "description": "保险柜内账册照片显示陈慧多次克扣周明灯光外包费，并有周明催款记录。",
+        "kind": "document",
+        "supportsFactIds": [
+          "fact_motive_zhou"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [
+          "character_zhou_ming"
+        ],
+        "excludesCharacterIds": [],
+        "critical": true,
+        "discovery": {
+          "method": "search",
+          "sceneId": "scene_ticket_office",
+          "objectId": "object_safe",
+          "actionAliases": [
+            "查看账册",
+            "翻拍记录"
+          ],
+          "prerequisiteEvidenceIds": [
+            "evidence_phone_lock"
+          ]
+        }
+      },
+      {
+        "id": "evidence_sun_testimony",
+        "name": "孙丽的目击证词",
+        "description": "孙丽称案发前后看到周明从后台走廊西侧快步离开，神色慌张。",
+        "kind": "testimony",
+        "supportsFactIds": [
+          "fact_opportunity_zhou",
+          "fact_identity_zhou"
+        ],
+        "contradictsClaimIds": [
+          "claim_zhou_alibi"
+        ],
+        "implicatesCharacterIds": [
+          "character_zhou_ming"
+        ],
+        "excludesCharacterIds": [],
+        "critical": true,
+        "discovery": {
+          "method": "interview",
+          "sceneId": "scene_backstage_corridor",
+          "characterId": "character_sun_li",
+          "actionAliases": [
+            "询问孙丽",
+            "了解发现经过"
+          ],
+          "dialogueAliases": [
+            "你当时看到了什么？",
+            "有没有看到其他人？",
+            "周明当时在哪里？"
+          ],
+          "dialogueUtterance": "我听到走廊有响动，过去时看到周明从西侧快步离开，他看起来很紧张。",
+          "prerequisiteEvidenceIds": [
+            "evidence_wound_pattern"
+          ]
+        }
+      },
+      {
+        "id": "evidence_zhou_testimony",
+        "name": "周明的陈述",
+        "description": "周明坚称自己一直在灯光控制室，但无法解释雨衣和工作服污渍。",
+        "kind": "testimony",
+        "supportsFactIds": [
+          "fact_opportunity_zhou"
+        ],
+        "contradictsClaimIds": [
+          "claim_zhou_alibi"
+        ],
+        "implicatesCharacterIds": [
+          "character_zhou_ming"
+        ],
+        "excludesCharacterIds": [],
+        "critical": true,
+        "discovery": {
+          "method": "interview",
+          "sceneId": "scene_lighting_control",
+          "characterId": "character_zhou_ming",
+          "actionAliases": [
+            "询问周明",
+            "追问行踪"
+          ],
+          "dialogueAliases": [
+            "你案发时在哪里？",
+            "为什么雨衣在走廊？",
+            "工作服上的污渍怎么回事？"
+          ],
+          "dialogueUtterance": "我一直在控制室，没去过走廊。雨衣可能是别人拿的，污渍我不清楚。",
+          "prerequisiteEvidenceIds": [
+            "evidence_raincoat_log",
+            "evidence_jacket_stain"
+          ]
+        }
+      },
+      {
+        "id": "evidence_liu_testimony",
+        "name": "刘媛的陈述",
+        "description": "刘媛称自己整晚在票务办公室整理物品，并提到曾与陈慧因服装费争吵。",
+        "kind": "testimony",
+        "supportsFactIds": [
+          "fact_relationship_liu_chen"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "interview",
+          "sceneId": "scene_ticket_office",
+          "characterId": "character_liu_yuan",
+          "actionAliases": [
+            "询问刘媛",
+            "了解争吵"
+          ],
+          "dialogueAliases": [
+            "你和陈慧有什么矛盾？",
+            "你案发时在做什么？",
+            "有没有听到异常？"
+          ],
+          "dialogueUtterance": "我一直在办公室，没听到外面动静。之前因为服装费和陈慧吵过，但后来就算了。",
+          "prerequisiteEvidenceIds": [
+            "evidence_office_camera"
+          ]
+        }
+      },
+      {
+        "id": "evidence_wang_testimony",
+        "name": "王建国的陈述",
+        "description": "王建国称自己来取保温杯，在门卫室签收快递后未去后台，并提到押金纠纷。",
+        "kind": "testimony",
+        "supportsFactIds": [
+          "fact_relationship_wang_chen"
+        ],
+        "contradictsClaimIds": [],
+        "implicatesCharacterIds": [],
+        "excludesCharacterIds": [],
+        "critical": false,
+        "discovery": {
+          "method": "interview",
+          "sceneId": "scene_guard_room",
+          "characterId": "character_wang_jianguo",
+          "actionAliases": [
+            "询问王建国",
+            "了解押金纠纷"
+          ],
+          "dialogueAliases": [
+            "你案发时在哪里？",
+            "你和陈慧有什么纠纷？",
+            "有没有去过后台？"
+          ],
+          "dialogueUtterance": "我在门卫室等快递，没去后台。押金的事陈慧一直拖着，但我没想怎么样。",
+          "prerequisiteEvidenceIds": [
+            "evidence_delivery_log"
+          ]
+        }
+      }
+    ],
+    "unlockRules": [
+      {
+        "id": "unlock_lighting_control",
+        "targetType": "scene",
+        "targetId": "scene_lighting_control",
+        "allEvidenceIds": [
+          "evidence_raincoat_log"
+        ],
+        "anyEvidenceIds": []
+      },
+      {
+        "id": "unlock_ticket_office",
+        "targetType": "scene",
+        "targetId": "scene_ticket_office",
+        "allEvidenceIds": [
+          "evidence_phone_lock"
+        ],
+        "anyEvidenceIds": []
+      },
+      {
+        "id": "unlock_guard_room",
+        "targetType": "scene",
+        "targetId": "scene_guard_room",
+        "allEvidenceIds": [
+          "evidence_phone_lock"
+        ],
+        "anyEvidenceIds": []
+      }
+    ],
+    "hintChains": [
+      {
+        "id": "hint_raincoat",
+        "targetFactId": "fact_raincoat_owner",
+        "hints": [
+          "旧戏箱上的雨衣似乎不属于后台常见物品。",
+          "检查雨衣内袋，可能有个人物品。",
+          "查看雨衣内袋的领用单签名。"
+        ]
+      },
+      {
+        "id": "hint_motive",
+        "targetFactId": "fact_motive_zhou",
+        "hints": [
+          "陈慧的手机有未读消息，可能涉及经济纠纷。",
+          "查看手机消息内容，寻找催款或欠款信息。",
+          "结合票务办公室账册，确认克扣记录。"
+        ]
+      },
+      {
+        "id": "hint_method",
+        "targetFactId": "fact_method_blunt",
+        "hints": [
+          "尸体后脑伤口有金属碎屑。",
+          "寻找剧场内可能作为钝器的金属物品。",
+          "查看灯光控制室维护记录，是否有借用镇纸。"
+        ]
+      }
+    ],
+    "solution": {
+      "culpritId": "character_zhou_ming",
+      "motiveFactId": "fact_motive_zhou",
+      "methodFactId": "fact_method_blunt",
+      "requiredEvidenceIds": [
+        "evidence_office_camera",
+        "evidence_delivery_log",
+        "evidence_ledger_photo",
+        "evidence_sun_testimony",
+        "evidence_zhou_testimony",
+        "evidence_jacket_stain"
+      ],
+      "requiredTimelineEventIds": [
+        "event_murder"
+      ]
+    }
+  },
+  "issues": [
+    {
+      "code": "insufficient_required_evidence_chain",
+      "path": "solution.requiredEvidenceIds",
+      "message": "the declared required evidence chain must independently identify the culprit, motive, and method; missing supportsFactIds: fact_method_blunt; remaining candidates: character_zhou_ming"
+    },
+    {
+      "code": "unnecessary_interview_evidence",
+      "path": "evidence",
+      "message": "evidence reachable without any interview independently identifies the culprit, motive, and method; make an interview supply a necessary contribution or unlock relevant proof, rather than repeat an already complete case"
+    },
+    {
+      "code": "premature_direct_evidence_reveal",
+      "path": "evidence",
+      "message": "multiple direct scene physical or forensic clues explicitly name the culprit"
+    },
+    {
+      "code": "premature_initial_scene_sensitive_fact",
+      "path": "evidence[0].supportsFactIds",
+      "message": "initial scene evidence \"evidence_wound_pattern\" cannot directly establish identity, motive, method, opportunity, or alibi facts"
+    },
+    {
+      "code": "premature_initial_scene_suspect_link",
+      "path": "evidence[1].implicatesCharacterIds",
+      "message": "initial scene evidence \"evidence_phone_lock\" cannot implicate or exclude a suspect; keep suspect links for later scenes or interviews"
+    },
+    {
+      "code": "premature_initial_scene_sensitive_fact",
+      "path": "evidence[1].supportsFactIds",
+      "message": "initial scene evidence \"evidence_phone_lock\" cannot directly establish identity, motive, method, opportunity, or alibi facts"
+    },
+    {
+      "code": "initial_scene_suspect_name_leak",
+      "path": "evidence[1]",
+      "message": "initial scene evidence \"evidence_phone_lock\" or its directly supported fact names suspect \"周明\""
+    },
+    {
+      "code": "premature_initial_scene_sensitive_fact",
+      "path": "evidence[2].supportsFactIds",
+      "message": "initial scene evidence \"evidence_metal_fragment\" cannot directly establish identity, motive, method, opportunity, or alibi facts"
+    },
+    {
+      "code": "premature_initial_scene_suspect_link",
+      "path": "evidence[3].implicatesCharacterIds",
+      "message": "initial scene evidence \"evidence_raincoat_log\" cannot implicate or exclude a suspect; keep suspect links for later scenes or interviews"
+    },
+    {
+      "code": "initial_scene_suspect_name_leak",
+      "path": "evidence[3]",
+      "message": "initial scene evidence \"evidence_raincoat_log\" or its directly supported fact names suspect \"周明\""
+    }
+  ],
+  "truncatedResponse": "{\n  \"title\": \"雨夜散场后的社区剧场\",\n  \"briefing\": \"周六晚社区剧场演出结束后，清洁员在后台走廊发现票务主管陈慧倒在血泊中。当晚有三人因不同理由滞留在剧场：负责灯光的技术员、临时帮忙的志愿者、以及来取遗落物品的退休教师。剧场外正下着大雨，警方到场时后台监控主机已被水浸坏，但现场仍留下若干待查痕迹。\",\n  \"setting\": {\n    \"era\": \"contemporary\",\n    \"place\": \"城西社区剧场\",\n    \"occurredAt\": \"2025-04-12T21:40:00+08:00\"\n  },\n  \"victimId\": \"character_chen_hui\",\n  \"culpritId\": \"character_zhou_ming\",\n  \"characters\": [\n    {\n      \"id\": \"character_zhou_ming\",\n      \"lieRules\": [\n        {\n          \"factId\": \"fact_opportunity_zhou\",\n          \"strategy\": \"fabricate_cover\",\n          \"coverStatement\": \"我一直在灯光控制室，没有去过走廊。\"\n        }\n      ]\n    }\n  ],\n  \"facts\": [\n    {\n      \"id\": \"fact_method_blunt\",\n      \"type\": \"method\",\n      \"statement\": \"陈慧被钝器从后方击打后脑致死。\"\n    }\n  ],\n  \"evidence\": [\n    {\n      \"id\": \"evidence_wound_pattern\",\n      \"name\": \"后脑钝器伤\",\n      \"description\": \"尸体后脑有一处弧形挫裂伤，边缘有金属碎屑残留，符合钝器打击特征。\",\n      \"kind\": \"forensic\",\n      \"supportsFactIds\": [],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"inspect\",\n        \"sceneId\": \"scene_backstage_corridor\",\n        \"objectId\": \"object_body\",\n        \"actionAliases\": [\n          \"检查伤口\",\n          \"查看钝器伤\"\n        ],\n        \"prerequisiteEvidenceIds\": []\n      }\n    },\n    {\n      \"id\": \"evidence_phone_lock\",\n      \"name\": \"碎裂手机\",\n      \"description\": \"手机屏幕碎裂但未解锁，显示有一条未读消息，内容为周明发送的催款信息。\",\n      \"kind\": \"digital\",\n      \"supportsFactIds\": [],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"inspect\",\n        \"sceneId\": \"scene_backstage_corridor\",\n        \"objectId\": \"object_body\",\n        \"actionAliases\": [\n          \"查看手机\",\n          \"读取消息\"\n        ],\n        \"prerequisiteEvidenceIds\": []\n      }\n    },\n    {\n      \"id\": \"evidence_metal_fragment\",\n      \"name\": \"金属碎屑\",\n      \"description\": \"走廊地面发现一小片金属碎屑，与尸体伤口处残留物成分一致。\",\n      \"kind\": \"forensic\",\n      \"supportsFactIds\": [],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"search\",\n        \"sceneId\": \"scene_backstage_corridor\",\n        \"objectId\": \"object_corridor_floor\",\n        \"actionAliases\": [\n          \"收集碎屑\",\n          \"检查地面\"\n        ],\n        \"prerequisiteEvidenceIds\": []\n      }\n    },\n    {\n      \"id\": \"evidence_raincoat_log\",\n      \"name\": \"深色雨衣\",\n      \"description\": \"旧戏箱上的深色雨衣内袋有一张灯光设备领用单，领用人签名是周明。\",\n      \"kind\": \"physical\",\n      \"supportsFactIds\": [\n        \"fact_raincoat_owner\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"search\",\n        \"sceneId\": \"scene_backstage_corridor\",\n        \"objectId\": \"object_old_trunk\",\n        \"actionAliases\": [\n          \"检查雨衣\",\n          \"翻找内袋\"\n        ],\n        \"prerequisiteEvidenceIds\": []\n      }\n    },\n    {\n      \"id\": \"evidence_maintenance_log\",\n      \"name\": \"设备维护记录\",\n      \"description\": \"灯光控制室维护记录显示周明在案发前曾借用镇纸作为临时压线工具，但未归还。\",\n      \"kind\": \"document\",\n      \"supportsFactIds\": [\n        \"fact_method_blunt\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [\n        \"character_zhou_ming\"\n      ],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"search\",\n        \"sceneId\": \"scene_lighting_control\",\n        \"objectId\": \"object_tool_cabinet\",\n        \"actionAliases\": [\n          \"查看维护记录\",\n          \"翻阅记录本\"\n        ],\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_raincoat_log\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_jacket_stain\",\n      \"name\": \"工作服污渍\",\n      \"description\": \"周明工作服袖口有暗色污渍，经检验为陈慧血迹。\",\n      \"kind\": \"forensic\",\n      \"supportsFactIds\": [\n        \"fact_identity_zhou\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [\n        \"character_zhou_ming\"\n      ],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"analyze\",\n        \"sceneId\": \"scene_lighting_control\",\n        \"objectId\": \"object_work_jacket\",\n        \"actionAliases\": [\n          \"检验污渍\",\n          \"分析血迹\"\n        ],\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_wound_pattern\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_office_camera\",\n      \"name\": \"票务办公室监控\",\n      \"description\": \"监控显示刘媛从21:20至22:00一直在票务办公室内整理物品，未离开。\",\n      \"kind\": \"digital\",\n      \"supportsFactIds\": [\n        \"fact_alibi_liu\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [\n        \"character_liu_yuan\"\n      ],\n      \"critical\": true,\n      \"discovery\": {\n        \"method\": \"query\",\n        \"sceneId\": \"scene_ticket_office\",\n        \"objectId\": \"object_monitor\",\n        \"actionAliases\": [\n          \"查看监控\",\n          \"回放录像\"\n        ],\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_phone_lock\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_delivery_log\",\n      \"name\": \"快递签收记录\",\n      \"description\": \"门卫室终端显示王建国于21:30签收快递，并有门卫确认其一直在门卫室至22:00。\",\n      \"kind\": \"digital\",\n      \"supportsFactIds\": [\n        \"fact_alibi_wang\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [\n        \"character_wang_jianguo\"\n      ],\n      \"critical\": true,\n      \"discovery\": {\n        \"method\": \"query\",\n        \"sceneId\": \"scene_guard_room\",\n        \"objectId\": \"object_delivery_terminal\",\n        \"actionAliases\": [\n          \"查询签收记录\",\n          \"查看终端\"\n        ],\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_phone_lock\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_ledger_photo\",\n      \"name\": \"账册照片\",\n      \"description\": \"保险柜内账册照片显示陈慧多次克扣周明灯光外包费，并有周明催款记录。\",\n      \"kind\": \"document\",\n      \"supportsFactIds\": [\n        \"fact_motive_zhou\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [\n        \"character_zhou_ming\"\n      ],\n      \"excludesCharacterIds\": [],\n      \"critical\": true,\n      \"discovery\": {\n        \"method\": \"search\",\n        \"sceneId\": \"scene_ticket_office\",\n        \"objectId\": \"object_safe\",\n        \"actionAliases\": [\n          \"查看账册\",\n          \"翻拍记录\"\n        ],\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_phone_lock\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_sun_testimony\",\n      \"name\": \"孙丽的目击证词\",\n      \"description\": \"孙丽称案发前后看到周明从后台走廊西侧快步离开，神色慌张。\",\n      \"kind\": \"testimony\",\n      \"supportsFactIds\": [\n        \"fact_opportunity_zhou\",\n        \"fact_identity_zhou\"\n      ],\n      \"contradictsClaimIds\": [\n        \"claim_zhou_alibi\"\n      ],\n      \"implicatesCharacterIds\": [\n        \"character_zhou_ming\"\n      ],\n      \"excludesCharacterIds\": [],\n      \"critical\": true,\n      \"discovery\": {\n        \"method\": \"interview\",\n        \"sceneId\": \"scene_backstage_corridor\",\n        \"characterId\": \"character_sun_li\",\n        \"actionAliases\": [\n          \"询问孙丽\",\n          \"了解发现经过\"\n        ],\n        \"dialogueAliases\": [\n          \"你当时看到了什么？\",\n          \"有没有看到其他人？\",\n          \"周明当时在哪里？\"\n        ],\n        \"dialogueUtterance\": \"我听到走廊有响动，过去时看到周明从西侧快步离开，他看起来很紧张。\",\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_wound_pattern\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_zhou_testimony\",\n      \"name\": \"周明的陈述\",\n      \"description\": \"周明坚称自己一直在灯光控制室，但无法解释雨衣和工作服污渍。\",\n      \"kind\": \"testimony\",\n      \"supportsFactIds\": [\n        \"fact_opportunity_zhou\"\n      ],\n      \"contradictsClaimIds\": [\n        \"claim_zhou_alibi\"\n      ],\n      \"implicatesCharacterIds\": [\n        \"character_zhou_ming\"\n      ],\n      \"excludesCharacterIds\": [],\n      \"critical\": true,\n      \"discovery\": {\n        \"method\": \"interview\",\n        \"sceneId\": \"scene_lighting_control\",\n        \"characterId\": \"character_zhou_ming\",\n        \"actionAliases\": [\n          \"询问周明\",\n          \"追问行踪\"\n        ],\n        \"dialogueAliases\": [\n          \"你案发时在哪里？\",\n          \"为什么雨衣在走廊？\",\n          \"工作服上的污渍怎么回事？\"\n        ],\n        \"dialogueUtterance\": \"我一直在控制室，没去过走廊。雨衣可能是别人拿的，污渍我不清楚。\",\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_raincoat_log\",\n          \"evidence_jacket_stain\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_liu_testimony\",\n      \"name\": \"刘媛的陈述\",\n      \"description\": \"刘媛称自己整晚在票务办公室整理物品，并提到曾与陈慧因服装费争吵。\",\n      \"kind\": \"testimony\",\n      \"supportsFactIds\": [\n        \"fact_relationship_liu_chen\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"interview\",\n        \"sceneId\": \"scene_ticket_office\",\n        \"characterId\": \"character_liu_yuan\",\n        \"actionAliases\": [\n          \"询问刘媛\",\n          \"了解争吵\"\n        ],\n        \"dialogueAliases\": [\n          \"你和陈慧有什么矛盾？\",\n          \"你案发时在做什么？\",\n          \"有没有听到异常？\"\n        ],\n        \"dialogueUtterance\": \"我一直在办公室，没听到外面动静。之前因为服装费和陈慧吵过，但后来就算了。\",\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_office_camera\"\n        ]\n      }\n    },\n    {\n      \"id\": \"evidence_wang_testimony\",\n      \"name\": \"王建国的陈述\",\n      \"description\": \"王建国称自己来取保温杯，在门卫室签收快递后未去后台，并提到押金纠纷。\",\n      \"kind\": \"testimony\",\n      \"supportsFactIds\": [\n        \"fact_relationship_wang_chen\"\n      ],\n      \"contradictsClaimIds\": [],\n      \"implicatesCharacterIds\": [],\n      \"excludesCharacterIds\": [],\n      \"critical\": false,\n      \"discovery\": {\n        \"method\": \"interview\",\n        \"sceneId\": \"scene_guard_room\",\n        \"characterId\": \"character_wang_jianguo\",\n        \"actionAliases\": [\n          \"询问王建国\",\n          \"了解押金纠纷\"\n        ],\n        \"dialogueAliases\": [\n          \"你案发时在哪里？\",\n          \"你和陈慧有什么纠纷？\",\n          \"有没有去过后台？\"\n        ],\n        \"dialogueUtterance\": \"我在门卫室等快递，没去后台。押金的事陈慧一直拖着，但我没想怎么样。\",\n        \"prerequisiteEvidenceIds\": [\n          \"evidence_delivery_log\"\n        ]\n      }\n    }\n  ],\n  \"solution\": {\n    \"culpritId\": \"character_zhou_ming\",\n    \"motiveFactId\": \"fact_motive_zhou\",\n    \"methodFactId\": \"fact_method_blunt\",\n    \"requiredEvidenceIds\": [\n      \"evidence_office_camera\",\n      \"evidence_delivery_log\",\n      \"evidence_ledger_photo\",\n      \"evidence_sun_testimony\",\n      \"evidence_zhou_testimony\",\n      \"evidence_jacket_stain\",\n      \"evidence_maintenance_log\"\n    ],\n    \""
+}

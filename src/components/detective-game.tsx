@@ -42,7 +42,7 @@ interface GameView {
     id: string;
     title: string;
     briefing: string;
-    setting: { era: "contemporary"; place: string; occurredAt: string };
+    setting: { era: "contemporary"; place: string };
     victim: CharacterView | null;
   };
   characters: CharacterView[];
@@ -62,7 +62,6 @@ interface GameView {
     id: string;
     speakerId: string;
     statement: string;
-    kind: string;
   }>;
   dialogue: Array<{
     commandId: string;
@@ -84,7 +83,7 @@ interface GameView {
     suspects: CharacterView[];
     motiveFacts: Array<{ id: string; statement: string }>;
     methodFacts: Array<{ id: string; statement: string }>;
-    timelineEvents: Array<{ id: string; timestamp: string; description: string }>;
+    timelineEvents: Array<{ id: string; description: string }>;
     hasCompleteEvidenceChain: boolean;
     hasCompleteConfrontationDossier: boolean;
   };
@@ -161,6 +160,31 @@ const emptyReport: ReportDraft = {
   reasoning: "",
 };
 
+function restoreReportDraft(view: GameView): ReportDraft {
+  let draft = emptyReport;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(`spy-game-report:${view.session.id}`) ?? "null");
+    if (saved &&
+      ["culpritId", "motiveFactId", "methodFactId", "reasoning"].every((key) => typeof saved[key] === "string") &&
+      ["evidenceIds", "timelineEventIds"].every((key) =>
+        Array.isArray(saved[key]) && saved[key].every((id: unknown) => typeof id === "string"))) {
+      draft = saved as ReportDraft;
+    }
+  } catch {
+    // Ignore unavailable storage or a damaged draft; the case remains playable.
+  }
+  return {
+    ...draft,
+    culpritId: view.session.confrontation?.suspectId ??
+      (view.reportOptions.suspects.some((suspect) => suspect.id === draft.culpritId) ? draft.culpritId : ""),
+    motiveFactId: view.reportOptions.motiveFacts.some((fact) => fact.id === draft.motiveFactId) ? draft.motiveFactId : "",
+    methodFactId: view.reportOptions.methodFacts.some((fact) => fact.id === draft.methodFactId) ? draft.methodFactId : "",
+    evidenceIds: draft.evidenceIds.filter((id) => view.evidence.some((evidence) => evidence.id === id)),
+    timelineEventIds: draft.timelineEventIds.filter((id) =>
+      view.reportOptions.timelineEvents.some((event) => event.id === id)),
+  };
+}
+
 export function DetectiveGame() {
   const [lobby, setLobby] = useState<LobbyData | null>(null);
   const [view, setView] = useState<GameView | null>(null);
@@ -170,7 +194,7 @@ export function DetectiveGame() {
   const [selectedSceneId, setSelectedSceneId] = useState("");
   const [selectedCharacterId, setSelectedCharacterId] = useState("");
   const [investigationText, setInvestigationText] = useState("");
-  const [dialogueText, setDialogueText] = useState("");
+  const [dialogueDrafts, setDialogueDrafts] = useState<Record<string, string>>({});
   const [pendingDialogue, setPendingDialogue] = useState<PendingDialogue | null>(null);
   const [notes, setNotes] = useState("");
   const [reportDraft, setReportDraft] = useState<ReportDraft>(emptyReport);
@@ -193,24 +217,30 @@ export function DetectiveGame() {
   const notesSessionRef = useRef("");
   const godPreviousFocusRef = useRef<HTMLElement | null>(null);
   const dialogueRequestRef = useRef(false);
+  const requestSequenceRef = useRef(0);
+  const navigationRef = useRef(0);
+  const activeViewRef = useRef<GameView | null>(null);
   const activeSessionId = view?.session.id ?? "";
   const activeSessionRevision = view?.session.revision ?? 0;
 
   const loadLobby = useCallback(async () => {
-    setLoading(true);
+    const navigation = navigationRef.current;
+    if (!activeViewRef.current) setLoading(true);
     setError("");
     try {
       const data = await requestJson<LobbyData>("/api/bootstrap");
+      if (navigation !== navigationRef.current) return;
       setLobby(data);
       setAccessRequired(false);
     } catch (caught) {
+      if (navigation !== navigationRef.current) return;
       if (caught instanceof ApiError && caught.code === "access_required") {
         setAccessRequired(true);
       } else {
         setError(errorMessage(caught));
       }
     } finally {
-      setLoading(false);
+      if (navigation === navigationRef.current) setLoading(false);
     }
   }, []);
 
@@ -318,11 +348,17 @@ export function DetectiveGame() {
 
   useEffect(() => {
     if (!godMode || !activeSessionId) return;
+    let active = true;
     void requestJson<{ snapshot: unknown }>(
       `/api/games/${activeSessionId}/god`,
     )
-      .then((result) => setGodSnapshot(result.snapshot))
-      .catch((caught) => setError(errorMessage(caught)));
+      .then((result) => {
+        if (active) setGodSnapshot(result.snapshot);
+      })
+      .catch((caught) => {
+        if (active) setError(errorMessage(caught));
+      });
+    return () => { active = false; };
   }, [activeSessionId, activeSessionRevision, godMode]);
 
   useEffect(() => {
@@ -348,6 +384,17 @@ export function DetectiveGame() {
     window.localStorage.setItem(`spy-game-notes:${activeSessionId}`, notes);
   }, [activeSessionId, notes, view?.session.status]);
 
+  useEffect(() => {
+    if (!activeSessionId || notesSessionRef.current !== activeSessionId) return;
+    try {
+      const key = `spy-game-report:${activeSessionId}`;
+      if (view?.session.status === "closed") window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, JSON.stringify(reportDraft));
+    } catch {
+      // A browser without storage can still keep the draft for this visit.
+    }
+  }, [activeSessionId, reportDraft, view?.session.status]);
+
   const portraits = useMemo(() => {
     if (!view) return {};
     const cast = [
@@ -367,6 +414,11 @@ export function DetectiveGame() {
   );
   const pendingDialogueForSelectedCharacter =
     pendingDialogue?.characterId === selectedCharacterId ? pendingDialogue : null;
+  const dialogueText = dialogueDrafts[selectedCharacterId] ?? "";
+
+  function setDialogueText(text: string) {
+    setDialogueDrafts((drafts) => ({ ...drafts, [selectedCharacterId]: text }));
+  }
 
   async function unlockAccess(event: React.FormEvent) {
     event.preventDefault();
@@ -387,13 +439,17 @@ export function DetectiveGame() {
   }
 
   async function loadReview(sessionId: string) {
+    const navigation = navigationRef.current;
+    const isCurrent = () => navigation === navigationRef.current &&
+      activeViewRef.current?.session.id === sessionId;
     setReviewError("");
     try {
       const result = await requestJson<{ review: CaseReview | null }>(
         `/api/games/${sessionId}/review`,
       );
-      setReview(result.review);
+      if (isCurrent()) setReview(result.review);
     } catch (caught) {
+      if (!isCurrent()) return;
       const message = errorMessage(caught);
       setReviewError(message);
       setError(message);
@@ -402,13 +458,19 @@ export function DetectiveGame() {
 
   function enterGame(nextView: GameView) {
     window.scrollTo(0, 0);
+    navigationRef.current += 1;
+    activeViewRef.current = nextView;
     setView(nextView);
     setSelectedSceneId(nextView.scenes[0]?.id ?? "");
     setSelectedCharacterId(nextView.characters[0]?.id ?? "");
     const notesKey = `spy-game-notes:${nextView.session.id}`;
     notesSessionRef.current = nextView.session.id;
     setNotes(window.localStorage.getItem(notesKey) ?? "");
-    setReportDraft(emptyReport);
+    setReportDraft(restoreReportDraft(nextView));
+    setInvestigationText("");
+    setDialogueDrafts({});
+    setGodMode(false);
+    setGodSnapshot(null);
     setPendingDialogue(null);
     dialogueRequestRef.current = false;
     setReview(null);
@@ -419,17 +481,49 @@ export function DetectiveGame() {
     }
   }
 
+  function leaveGame() {
+    requestSequenceRef.current += 1;
+    navigationRef.current += 1;
+    activeViewRef.current = null;
+    notesSessionRef.current = "";
+    dialogueRequestRef.current = false;
+    setView(null);
+    setReview(null);
+    setPendingDialogue(null);
+    setBusy(false);
+    setNotice("");
+    setError("");
+    setGodMode(false);
+    setGodSnapshot(null);
+    window.scrollTo(0, 0);
+    void loadLobby();
+  }
+
+  function acceptGameView(nextView: GameView, isCurrent: () => boolean) {
+    const current = activeViewRef.current;
+    if (!isCurrent() || current?.session.id !== nextView.session.id ||
+      nextView.session.revision < current.session.revision) return false;
+    activeViewRef.current = nextView;
+    setView(nextView);
+    if (nextView.session.confrontation) {
+      const culpritId = nextView.session.confrontation.suspectId;
+      setReportDraft((draft) => ({ ...draft, culpritId }));
+    }
+    return true;
+  }
+
   function switchPanel(nextPanel: Panel) {
     setPanel(nextPanel);
     window.scrollTo(0, 0);
   }
 
   async function startCase(caseId: string) {
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{ view: GameView }>("/api/games", {
         method: "POST",
         body: JSON.stringify({ caseId }),
       });
+      if (!isCurrent()) return;
       enterGame(result.view);
       setPanel("briefing");
       setNotice("案件卷宗已启封，请先阅读开案背景");
@@ -437,20 +531,22 @@ export function DetectiveGame() {
   }
 
   async function resumeGame(sessionId: string) {
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{ view: GameView }>(
         `/api/games/${sessionId}`,
       );
+      if (!isCurrent()) return;
       enterGame(result.view);
-      setPanel(result.view.session.status === "closed" ? "review" : "scene");
+      setPanel(result.view.session.status === "closed" ? "review" :
+        result.view.session.confrontation ? "report" : "scene");
     });
   }
 
   async function investigate(objectId?: string, objectName?: string) {
-    if (!view) return;
+    if (!view || !selectedScene) return;
     const text = objectName ? `仔细检查${objectName}` : investigationText.trim();
     if (!text) return;
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{
         outcome: {
           status: string;
@@ -466,11 +562,11 @@ export function DetectiveGame() {
           commandId: commandId(),
           expectedRevision: view.session.revision,
           text,
-          sceneId: objectId ? selectedSceneId || undefined : undefined,
+          sceneId: selectedScene.id,
           objectId,
         }),
       });
-      setView(result.view);
+      if (!acceptGameView(result.view, isCurrent)) return;
       setInvestigationText("");
       setNotice(investigationNotice(result.outcome));
     });
@@ -488,6 +584,7 @@ export function DetectiveGame() {
     const playerText = dialogueText.trim();
     const currentCommandId = commandId();
     const characterId = selectedCharacter.id;
+    const navigation = navigationRef.current;
     let responseReceived = false;
 
     dialogueRequestRef.current = true;
@@ -498,7 +595,7 @@ export function DetectiveGame() {
       characterId,
       playerText,
     });
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{
         outcome: {
           status: string;
@@ -515,14 +612,15 @@ export function DetectiveGame() {
           text: playerText,
         }),
       });
+      if (!acceptGameView(result.view, isCurrent)) return;
       responseReceived = true;
-      setView(result.view);
       setNotice(
         result.outcome.discoveredEvidenceIds.length > 0
           ? `证言已记录，新线索 ${result.outcome.discoveredEvidenceIds.length} 条`
           : "本轮询问已记录",
       );
     });
+    if (navigation !== navigationRef.current) return;
     dialogueRequestRef.current = false;
     setPendingDialogue((current) =>
       current?.commandId === currentCommandId ? null : current,
@@ -532,7 +630,7 @@ export function DetectiveGame() {
 
   async function useHint() {
     if (!view) return;
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{
         outcome: { status: string; hint?: string };
         view: GameView;
@@ -544,14 +642,14 @@ export function DetectiveGame() {
           expectedRevision: view.session.revision,
         }),
       });
-      setView(result.view);
+      if (!acceptGameView(result.view, isCurrent)) return;
       setNotice(result.outcome.hint ?? "没有更多提示");
     });
   }
 
   async function showEvidence(evidenceId: string) {
     if (!view || !selectedCharacter) return;
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{
         outcome: { status: string };
         view: GameView;
@@ -565,7 +663,7 @@ export function DetectiveGame() {
           evidenceId,
         }),
       });
-      setView(result.view);
+      if (!acceptGameView(result.view, isCurrent)) return;
       setNotice(
         result.outcome.status === "presented" ? "证据已出示" : "这份证据无法出示",
       );
@@ -581,7 +679,7 @@ export function DetectiveGame() {
       return;
     }
     if (!reportIsComplete(reportDraft)) return;
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{
         view: GameView;
         review: CaseReview;
@@ -594,7 +692,7 @@ export function DetectiveGame() {
           ...reportDraft,
         }),
       });
-      setView(result.view);
+      if (!acceptGameView(result.view, isCurrent)) return;
       setReview(result.review);
       setReviewError("");
       switchPanel("review");
@@ -609,7 +707,7 @@ export function DetectiveGame() {
     ) {
       return;
     }
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{
         outcome: { status: string; rebuttal?: string };
         view: GameView;
@@ -622,14 +720,14 @@ export function DetectiveGame() {
           suspectId: reportDraft.culpritId,
         }),
       });
-      setView(result.view);
+      if (!acceptGameView(result.view, isCurrent)) return;
       setNotice(result.outcome.rebuttal ?? "嫌疑人要求你拿出完整证据链。");
     });
   }
 
   async function resolveConfrontation() {
     if (!view) return;
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const result = await requestJson<{
         outcome: { status: string; rebuttal?: string; confession?: string };
         view: GameView;
@@ -641,9 +739,10 @@ export function DetectiveGame() {
           commandId: commandId(),
           expectedRevision: view.session.revision,
           ...reportDraft,
+          culpritId: view.session.confrontation?.suspectId ?? reportDraft.culpritId,
         }),
       });
-      setView(result.view);
+      if (!acceptGameView(result.view, isCurrent)) return;
       if (result.outcome.status === "confessed") {
         setReview(result.review);
         setReviewError("");
@@ -658,7 +757,7 @@ export function DetectiveGame() {
   async function generateCase(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const queued = await requestJson<{ jobId: string; seed: string }>(
         "/api/generation",
         {
@@ -670,6 +769,7 @@ export function DetectiveGame() {
           }),
         },
       );
+      if (!isCurrent()) return;
       const queuedAt = new Date().toISOString();
       setGenerationJob({
         id: queued.jobId,
@@ -697,7 +797,7 @@ export function DetectiveGame() {
       setError("案件文件不能超过 2 MB。");
       return;
     }
-    await runBusy(async () => {
+    await runBusy(async (isCurrent) => {
       const bundle = JSON.parse(await file.text()) as unknown;
       const result = await requestJson<{ case: { title: string } }>(
         "/api/cases/import",
@@ -706,21 +806,25 @@ export function DetectiveGame() {
           body: JSON.stringify(bundle),
         },
       );
+      if (!isCurrent()) return;
       await loadLobby();
+      if (!isCurrent()) return;
       setNotice(`《${result.case.title}》已通过校验并归档`);
     });
   }
 
-  async function runBusy(operation: () => Promise<void>) {
+  async function runBusy(operation: (isCurrent: () => boolean) => Promise<void>) {
+    const sequence = ++requestSequenceRef.current;
+    const isCurrent = () => sequence === requestSequenceRef.current;
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      await operation();
+      await operation(isCurrent);
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (isCurrent()) setError(errorMessage(caught));
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
@@ -761,12 +865,7 @@ export function DetectiveGame() {
       <header className="case-header">
         <button
           className="brand-mark"
-          onClick={() => {
-            window.scrollTo(0, 0);
-            setView(null);
-            setReview(null);
-            void loadLobby();
-          }}
+          onClick={leaveGame}
           aria-label="返回案件大厅"
         >
           <span>CASE</span>
@@ -873,6 +972,7 @@ export function DetectiveGame() {
           )}
           {panel === "dialogue" && selectedCharacter && (
             <DialoguePanel
+              key={`${view.session.id}:${selectedCharacter.id}`}
               character={selectedCharacter}
               characters={view.characters}
               selectedCharacterId={selectedCharacter.id}
@@ -1136,7 +1236,7 @@ function Lobby(props: {
           </button>
         </form>
         <p className="cost-note">
-          典型单局估算：低峰约 ¥1.19，高峰约 ¥2.38；实际按生成修复次数与对话长度变化。
+          生成与对话按实际用量计费；案件修复次数和对话长度会影响费用。
         </p>
         {props.generationStatus && (
           <p className="generation-status" role="status">
@@ -1246,10 +1346,6 @@ function BriefingPanel(props: {
             <dt>案发地点</dt>
             <dd>{props.caseInfo.setting.place}</dd>
           </div>
-          <div>
-            <dt>记录时间</dt>
-            <dd>{formatDate(props.caseInfo.setting.occurredAt)}</dd>
-          </div>
           {victim && (
             <div>
               <dt>案件相关者</dt>
@@ -1335,7 +1431,7 @@ function ScenePanel(props: {
           props.onInvestigate();
         }}
       >
-        <label htmlFor="investigation-text">自由描述你的搜查行动</label>
+        <label htmlFor="investigation-text">在{props.scene.name}搜查</label>
         <div>
           <textarea
             id="investigation-text"
@@ -1353,7 +1449,7 @@ function ScenePanel(props: {
               event.preventDefault();
               if (!props.busy && props.investigationText.trim()) props.onInvestigate();
             }}
-            placeholder="例如：我想检查书桌抽屉里有没有被藏起来的文件……（Enter 执行，Shift + Enter 换行）"
+            placeholder={`描述你想在${props.scene.name}检查的物件或痕迹……（Enter 执行，Shift + Enter 换行）`}
             rows={3}
           />
           <button disabled={props.busy || !props.investigationText.trim()}>
@@ -1380,6 +1476,33 @@ function DialoguePanel(props: {
   onTalk: () => void;
   onShowEvidence: (evidenceId: string) => void;
 }) {
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
+  const previousPendingRef = useRef<string | undefined>(undefined);
+  const [hasNewReply, setHasNewReply] = useState(false);
+  const lastExchangeId = props.history.at(-1)?.commandId;
+  const pendingId = props.pendingDialogue?.commandId;
+  const previousExchangeRef = useRef(lastExchangeId);
+
+  useEffect(() => {
+    const sending = Boolean(pendingId && pendingId !== previousPendingRef.current);
+    const received = lastExchangeId !== previousExchangeRef.current;
+    previousPendingRef.current = pendingId;
+    const frame = window.requestAnimationFrame(() => {
+      const transcript = transcriptRef.current;
+      if (!transcript) return;
+      previousExchangeRef.current = lastExchangeId;
+      if (sending || followLatestRef.current) {
+        transcript.scrollTop = transcript.scrollHeight;
+        followLatestRef.current = true;
+        setHasNewReply(false);
+      } else if (received) {
+        setHasNewReply(true);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [lastExchangeId, pendingId]);
+
   return (
     <div className="stage-panel dialogue-panel">
       <label className="character-switcher">
@@ -1409,34 +1532,63 @@ function DialoguePanel(props: {
       <p className="interview-guide">
         可从公开身份、现场物件、时间段和矛盾说法切入。部分关键证词需要清楚问到人和事。
       </p>
-      <div className="transcript" aria-live="polite">
-        {props.history.length === 0 && !props.pendingDialogue ? (
-          <div className="transcript-empty">
-            <span>REC</span>
-            <p>录音尚未开始。你可以自由提问，对方会记住你们的谈话。</p>
-          </div>
-        ) : (
-          props.history.map((exchange) => (
-            <div className="exchange" key={exchange.commandId}>
-              <p className="detective-line"><span>侦探</span>{exchange.playerText}</p>
-              <p className="character-line">
-                <span>{props.character.name} · {demeanorLabel(exchange.demeanor)}</span>
-                {exchange.utterance}
+      <div className="transcript-frame">
+        <div
+          className="transcript"
+          ref={transcriptRef}
+          role="log"
+          aria-label={`与${props.character.name}的询问记录`}
+          aria-live="polite"
+          tabIndex={0}
+          onScroll={(event) => {
+            const transcript = event.currentTarget;
+            const atLatest = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48;
+            followLatestRef.current = atLatest;
+            if (atLatest) setHasNewReply(false);
+          }}
+        >
+          {props.history.length === 0 && !props.pendingDialogue ? (
+            <div className="transcript-empty">
+              <span>REC</span>
+              <p>录音尚未开始。你可以自由提问，对方会记住你们的谈话。</p>
+            </div>
+          ) : (
+            props.history.map((exchange) => (
+              <div className="exchange" key={exchange.commandId}>
+                <p className="detective-line"><span>侦探</span>{exchange.playerText}</p>
+                <p className="character-line">
+                  <span>{props.character.name} · {demeanorLabel(exchange.demeanor)}</span>
+                  {exchange.utterance}
+                </p>
+              </div>
+            ))
+          )}
+          {props.pendingDialogue && (
+            <div className="exchange is-pending" key={props.pendingDialogue.commandId}>
+              <p className="detective-line">
+                <span>侦探</span>
+                {props.pendingDialogue.playerText}
+              </p>
+              <p className="character-line response-pending">
+                <span>{props.character.name} · 正在回应</span>
+                <i>正在整理回答</i>
               </p>
             </div>
-          ))
-        )}
-        {props.pendingDialogue && (
-          <div className="exchange is-pending" key={props.pendingDialogue.commandId}>
-            <p className="detective-line">
-              <span>侦探</span>
-              {props.pendingDialogue.playerText}
-            </p>
-            <p className="character-line response-pending">
-              <span>{props.character.name} · 正在回应</span>
-              <i>正在整理回答</i>
-            </p>
-          </div>
+          )}
+        </div>
+        {hasNewReply && (
+          <button
+            type="button"
+            className="new-reply-button"
+            onClick={() => {
+              const transcript = transcriptRef.current;
+              if (transcript) transcript.scrollTop = transcript.scrollHeight;
+              followLatestRef.current = true;
+              setHasNewReply(false);
+            }}
+          >
+            查看新回复 ↓
+          </button>
         )}
       </div>
       {props.evidence.length > 0 && (
@@ -1667,12 +1819,13 @@ function ReportPanel(props: {
         </div>
       </fieldset>
       <fieldset>
-        <legend>{confrontation ? "完整时间线" : "时间线"}</legend>
+        <legend>{confrontation ? "完整经过" : "重建经过"}</legend>
         {!props.view.reportOptions.hasCompleteEvidenceChain ? (
           <p className="locked-copy">必要证据尚未集齐，完整时间线暂无法重建；你仍可提前结案，但时间线项目不会计分。</p>
         ) : (
           <div className="timeline-checks">
-            {props.view.reportOptions.timelineEvents.map((event) => (
+            <p className="report-choice-note">按先后关系核对案发经过，具体时刻以已取得的证据为准。</p>
+            {props.view.reportOptions.timelineEvents.map((event, index) => (
               <label key={event.id}>
                 <input
                   type="checkbox"
@@ -1685,7 +1838,7 @@ function ReportPanel(props: {
                     ),
                   })}
                 />
-                <time>{formatTime(event.timestamp)}</time>
+                <span className="timeline-order">{String(index + 1).padStart(2, "0")}</span>
                 <span>{event.description}</span>
               </label>
             ))}
@@ -2298,7 +2451,7 @@ function generationStageLabel(job: GenerationJobView) {
       drafting: "正在编织案情",
       validating: "正在核对线索",
       repairing: "正在针对校验问题进行局部修复",
-      blind_solving: "正在独立推演",
+      blind_solving: "正在复核案件推理",
       finalizing: "正在封存卷宗",
     }[job.stage] ?? "正在细致整理案件"
   );
@@ -2313,9 +2466,7 @@ function generationProgressText(job: GenerationJobView, statusTick = 0) {
       validating: ["正在比对物证", "正在复核证词", "正在串联时间线"],
       repairing: ["正在追查矛盾证词", "正在补齐证据链", "正在重新勘验现场"],
       blind_solving: [
-        "正在锁定嫌疑人",
-        "正在追查嫌犯行踪",
-        "正在押解嫌犯接受讯问",
+        "正在检查开局信息与线索，检验案件能否被独立解开",
       ],
       finalizing: ["正在整理卷宗", "正在提交结案报告", "正在归档物证"],
     }[job.status === "queued" ? "queued" : job.stage] ?? ["正在调阅案件档案"];

@@ -1,5 +1,6 @@
 import type { CaseArtifact } from "@/domain/case/case-artifact";
 import { solveCaseWithEvidenceIds } from "@/domain/case/case-solver";
+import { publicCharacterProfile } from "@/domain/case/public-information";
 import {
   findInitiallyDiscoverableSceneEvidenceIds,
   findReachableEvidenceIds,
@@ -862,11 +863,13 @@ export function buildGroundedDialogueFallback(
   );
   if (!character) throw new Error(`Unknown character "${characterId}"`);
 
+  const questionToAnswer = resolveDialogueQuestion(session, characterId, playerText);
+
   const matchingEvidence = findMatchedInterviewEvidence(
     caseArtifact,
     session,
     character.id,
-    playerText,
+    questionToAnswer,
   )[0];
   const previousMemory = session.characterStates[character.id]?.memorySummary ?? "";
   if (matchingEvidence) {
@@ -886,10 +889,10 @@ export function buildGroundedDialogueFallback(
   const reply = selectGroundedDialogueReply({
     caseArtifact,
     character,
-    playerText,
+    session,
+    playerText: questionToAnswer,
     matchingEvidence,
     allowedClaims,
-    knownClaimIds: new Set(session.discoveredClaimIds),
   });
   return {
     ...reply,
@@ -902,9 +905,8 @@ export function buildGroundedDialogueFallback(
 }
 
 /**
- * 只有账本能直接、安全地回答的高频追问才会跳过模型：明确指向角色遮掩事实的
- * 指控、明确命中的访谈证据，以及角色已给出证词后的核验追问。其余自由问答仍交给
- * 模型，保留可玩性。
+ * 首次指控与访谈证据可按账本回答；账本缺少的证明或时间细节直接说明无法确认，
+ * 避免模型把“没有记载”编成“当时无人见证”，再通过历史对话固化这个说法。
  */
 export function buildDeterministicDialogueShortcut(
   caseArtifact: CaseArtifact,
@@ -916,18 +918,48 @@ export function buildDeterministicDialogueShortcut(
     (candidate) => candidate.id === characterId,
   );
   if (!character) throw new Error(`Unknown character "${characterId}"`);
+  playerText = resolveDialogueQuestion(session, characterId, playerText);
+
+  if (dialogueBackgroundTopic(playerText) === "tenure" &&
+    !getDialogueGroundingSources(caseArtifact, session, characterId).some((source) =>
+      matchesBackgroundTopic("tenure", source.statement) && /[\d零〇一二两三四五六七八九十百]+(?:年|月)|刚入职|刚到任/u.test(source.statement),
+    )) {
+    return {
+      utterance: "具体的工作年限，我现在无法确认，得核对一下。",
+      demeanor: "guarded", disclosedClaimIds: [], memorySummary: "侦探追问工作年限；没有可确认的任职时长。",
+      stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+    };
+  }
+
+  if (isSpecificActivityQuestion(playerText)) {
+    const reply = selectGroundedWorkDetail(caseArtifact, session, characterId, playerText);
+    if (!reply.disclosedClaimIds.length && reply.utterance.includes("无法确认")) {
+      return { ...reply, memorySummary: "侦探追问具体工作内容；没有可确认的细节。", stateDelta: { trust: 0, pressure: 0, alertness: 0 } };
+    }
+    return null;
+  }
 
   const matchingLieRule = findQuestionMatchedLieRule(
     caseArtifact,
     character,
     playerText,
   );
-  if (matchingLieRule) {
+  if (
+    matchingLieRule &&
+    !session.dialogue.some(
+      (exchange) =>
+        exchange.characterId === character.id &&
+        normalizeDialogueText(exchange.utterance) ===
+          normalizeDialogueText(matchingLieRule.coverStatement),
+    )
+  ) {
     const previousMemory = session.characterStates[character.id]?.memorySummary ?? "";
     return {
       utterance: matchingLieRule.coverStatement,
       demeanor: "guarded",
-      disclosedClaimIds: [],
+      disclosedClaimIds: matchingAuthorizedClaimIds(
+        caseArtifact, session, character.id, matchingLieRule.coverStatement,
+      ),
       memorySummary: [previousMemory, `侦探问及：${playerText.slice(0, 120)}`]
         .filter(Boolean)
         .join(" ")
@@ -951,40 +983,39 @@ export function buildDeterministicDialogueShortcut(
     });
   }
 
-  const normalizedQuestion = normalizeDialogueText(playerText);
-  const previouslyDisclosedClaimIds = new Set(
-    session.dialogue
-      .filter((exchange) => exchange.characterId === character.id)
-      .flatMap((exchange) => exchange.disclosedClaimIds),
-  );
-  if (
-    previouslyDisclosedClaimIds.size === 0 ||
-    !isVerificationFollowUp(normalizedQuestion)
-  ) {
-    return null;
+  if (isVerificationFollowUp(playerText)) {
+    const followUp = buildGroundedFollowUp({
+      caseArtifact, character, playerText,
+      allowedClaims: caseArtifact.claims.filter((claim) =>
+        claimCanBeDisclosed(caseArtifact, session, character.id, claim.id),
+      ),
+    }, session);
+    if (followUp) {
+      return {
+        ...followUp.response,
+        memorySummary: `侦探追问：${playerText.slice(0, 120)}；按现有证明的完整内容回答。`,
+        stateDelta: { trust: 0, pressure: 0, alertness: 0 },
+      };
+    }
   }
 
-  const response = buildGroundedDialogueFallback(
-    caseArtifact,
-    session,
-    characterId,
-    playerText,
-  );
-  return response.disclosedClaimIds.some((claimId) =>
-    previouslyDisclosedClaimIds.has(claimId),
-  )
-    ? response
-    : null;
+  return null;
 }
 
 function selectGroundedDialogueReply(input: {
   caseArtifact: CaseArtifact;
   character: CaseArtifact["characters"][number];
+  session?: GameSession;
   playerText: string;
   matchingEvidence?: CaseArtifact["evidence"][number];
   allowedClaims: CaseArtifact["claims"];
-  knownClaimIds: ReadonlySet<string>;
 }) {
+  if (input.session && isSpecificActivityQuestion(input.playerText)) {
+    return selectGroundedWorkDetail(input.caseArtifact, input.session, input.character.id, input.playerText);
+  }
+  const followUp = input.session && buildGroundedFollowUp(input, input.session);
+  if (followUp) return followUp.response;
+
   const relatedClaims = input.matchingEvidence
     ? input.allowedClaims.filter((claim) =>
         claim.factIds.some((factId) =>
@@ -992,10 +1023,41 @@ function selectGroundedDialogueReply(input: {
         ),
       )
     : [];
+  const backgroundTopic = dialogueBackgroundTopic(input.playerText);
+  const sources = input.session ? getDialogueGroundingSources(input.caseArtifact, input.session, input.character.id) : [];
+  const previousReply = input.session?.dialogue.findLast((exchange) => exchange.characterId === input.character.id)?.utterance ?? "";
+  const people = [
+    ...input.caseArtifact.characters.map((character) => character.name),
+    ...sources.flatMap((source) => Array.from(source.statement.matchAll(/(?:^|[。！？；，,]|我[和跟])([\p{Script=Han}]{2,8}?)(?=在|于|曾|看见|看到|见到|是|和我|跟我)/gu), (match) => match[1])),
+  ];
+  const namedPeople = people.filter((name) => input.playerText.includes(name));
+  const referencedPeople = namedPeople.length > 0 ? namedPeople
+    : /他|她|那人|这个人/u.test(input.playerText) ? people.filter((name) => previousReply.includes(name)) : [];
+  const topicQuestion = normalizeDialogueText(`${input.playerText} ${referencedPeople.join(" ")}`);
+  const matchesTopic = (statement: string) => matchesBackgroundTopic(backgroundTopic, statement) &&
+    (!backgroundTopic || referencedPeople.length === 0 || referencedPeople.some((name) => statement.includes(name)));
   const selectedClaim =
     relatedClaims[0] ??
-    input.allowedClaims.find((claim) => !input.knownClaimIds.has(claim.id)) ??
-    input.allowedClaims[0];
+    input.allowedClaims
+      .map((claim) => ({
+        claim,
+        score: dialogueTopicOverlapScore(
+          topicQuestion,
+          claim.statement,
+        ),
+      }))
+      .filter(({ claim, score }) => score >= (backgroundTopic ? 1 : 2) && matchesTopic(claim.statement))
+      .sort((left, right) => right.score - left.score)[0]?.claim ??
+    (!backgroundTopic && /(?:那天|当天|案发|当时|那晚|当晚).{0,12}(?:干嘛|干什么|做什么|做了什么|在做|哪里|哪儿)/u.test(input.playerText)
+      ? input.allowedClaims.find((claim) => /在|离开|上过|加班/u.test(claim.statement))
+      : undefined);
+  const selectedFact = input.session && !selectedClaim
+    ? sources
+        .filter((source) => !source.contextOnly && !source.claimId && matchesTopic(source.statement))
+        .map((source) => ({ source, score: dialogueTopicOverlapScore(topicQuestion, source.statement) }))
+        .filter(({ score }) => score >= (backgroundTopic ? 1 : 2))
+        .sort((left, right) => right.score - left.score)[0]?.source
+    : undefined;
   // 直接指控角色隐瞒的事实时，优先让其按案件账本中的 cover statement 应对；
   // 不把模型失败表现成一句机械的拒答，也不随机选择不相干的谎言。
   const matchingLieRule = input.matchingEvidence
@@ -1009,23 +1071,269 @@ function selectGroundedDialogueReply(input: {
     input.matchingEvidence?.description ??
     matchingLieRule?.coverStatement ??
     selectedClaim?.statement ??
-    `${input.character.name}语气克制：“我只能说明自己知道的部分，其余请你按证据核实。”`;
+    selectedFact?.statement ??
+    (backgroundTopic === "relationship" && /死者|受害者/u.test(input.playerText)
+      ? publicIdentityReply(input.caseArtifact, input.character.id)
+      : undefined) ??
+    (backgroundTopic === "tenure"
+      ? "具体的工作年限，我现在无法确认，得核对一下。"
+      : backgroundTopic === "relationship"
+        ? `我的身份是${input.character.occupation}；关于你问的具体来往，我现在没有可以确认的补充。`
+        : "关于你问的情况，我目前没有可以确认的补充。");
   const demeanor: CharacterDemeanor = input.matchingEvidence
     ? "cooperative"
     : matchingLieRule || selectedClaim?.kind === "lie"
       ? "guarded"
-      : selectedClaim
+      : selectedClaim || selectedFact
         ? "cooperative"
         : "evasive";
 
   return {
-    utterance,
+    utterance: input.session && input.session.dialogue.findLast((exchange) => exchange.characterId === input.character.id)?.utterance === utterance
+      ? `这一点我能说明的仍是：${utterance}`
+      : utterance,
     demeanor,
     disclosedClaimIds: matchingLieRule
-      ? []
+      ? input.session
+        ? matchingAuthorizedClaimIds(input.caseArtifact, input.session, input.character.id, matchingLieRule.coverStatement)
+        : []
       : selectedClaim
         ? [selectedClaim.id]
         : [],
+  };
+}
+
+function isSpecificActivityQuestion(question: string) {
+  return /(?:具体|详细).{0,8}(?:做|干|工作|忙)|工作内容|做些什么|在忙什么|在做什么工作/u.test(question);
+}
+
+function selectGroundedWorkDetail(caseArtifact: CaseArtifact, session: GameSession, characterId: string, question: string) {
+  const previous = session.dialogue.findLast((exchange) => exchange.characterId === characterId);
+  const topic = normalizeDialogueText(`${question} ${previous?.utterance ?? ""}`);
+  const detail = getDialogueGroundingSources(caseArtifact, session, characterId)
+    .filter((source) => !source.contextOnly)
+    .filter((source) => source.statement.split(/[。！？；，,]/u).some((clause) => {
+      const text = normalizeDialogueText(clause);
+      // 单独的加班地点、证明或未去现场的否认不能回答具体做了什么；不按有限动词表推断工作内容。
+      return text.length >= 4 && !/(?:加班|工作|值班|办公室|公司)[着了过]?$/u.test(text) &&
+        !/为证|(?:能|可以).{0,8}(?:证明|作证)|(?:没有|没|从未).{0,8}(?:去|进|离开|上过|下过)/u.test(text) &&
+        dialogueTopicOverlapScore(topic, text) >= 2;
+    }))
+    .map((source) => ({ source, score: dialogueTopicOverlapScore(topic, source.statement) }))
+    .sort((left, right) => right.score - left.score)[0]?.source;
+  const utterance = detail?.statement ?? "那晚的具体工作内容，我现在无法确认，不能随口给你一个说法。";
+  return {
+    utterance: previous?.utterance === utterance ? `具体工作这一点，我能说明的仍是：${utterance}` : utterance,
+    demeanor: "guarded" as const,
+    disclosedClaimIds: detail?.claimId ? [detail.claimId] : [],
+  };
+}
+
+function matchingAuthorizedClaimIds(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  statement: string,
+) {
+  return caseArtifact.claims
+    .filter((claim) =>
+      normalizeDialogueText(claim.statement) === normalizeDialogueText(statement) &&
+      claimCanBeDisclosed(caseArtifact, session, characterId, claim.id),
+    )
+    .map((claim) => claim.id);
+}
+
+export function getDialogueGroundingSources(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+): Array<{ statement: string; factIds: string[]; claimId: string; contextOnly?: boolean }> {
+  const character = caseArtifact.characters.find((candidate) => candidate.id === characterId);
+  if (!character) return [];
+  const victim = caseArtifact.characters.find((candidate) => candidate.id === caseArtifact.victimId);
+  return [
+    ...caseArtifact.claims
+      .filter((claim) => claimCanBeDisclosed(caseArtifact, session, characterId, claim.id))
+      .map((claim) => ({ statement: claim.statement, factIds: claim.factIds, claimId: claim.id })),
+    ...character.lieRules.map((rule) => ({ statement: rule.coverStatement, factIds: [rule.factId], claimId: "" })),
+    ...caseArtifact.facts
+      .filter((fact) => factCanBeDisclosed(caseArtifact, session, characterId, fact.id))
+      .map((fact) => ({ statement: fact.statement, factIds: [fact.id], claimId: "" })),
+    ...caseArtifact.evidence
+      .filter((evidence) => dialogueEvidenceCanBeDisclosed(caseArtifact, session, characterId, evidence.id))
+      .flatMap((evidence) => [`${evidence.name}：${evidence.description}`, evidence.discovery.dialogueUtterance]
+        .filter((statement): statement is string => Boolean(statement))
+        .map((statement) => ({ statement, factIds: evidence.supportsFactIds, claimId: "" }))),
+    { statement: publicCharacterProfile(character), factIds: [], claimId: "", contextOnly: true },
+    { statement: `${character.name}的职业是${character.occupation}。`, factIds: [], claimId: "", contextOnly: true },
+    { statement: caseArtifact.briefing, factIds: [], claimId: "", contextOnly: true },
+    ...(victim ? [
+      { statement: publicCharacterProfile(victim), factIds: [], claimId: "", contextOnly: true },
+      { statement: `${victim.name}的职业是${victim.occupation}。`, factIds: [], claimId: "", contextOnly: true },
+    ] : []),
+  ];
+}
+
+export function getPublicDialogueIdentities(caseArtifact: CaseArtifact, characterId: string) {
+  const character = caseArtifact.characters.find((candidate) => candidate.id === characterId);
+  const victim = caseArtifact.characters.find((candidate) => candidate.id === caseArtifact.victimId);
+  if (!character || !victim) return [];
+  const people = [character, victim];
+  const identities = people.map((person) => ({
+    characterId: person.id, identity: person.occupation,
+    sourceText: `${person.name}的职业是${person.occupation}。`,
+    declaration: `${person.name}的职业是${person.occupation}`,
+  }));
+  for (const sourceText of [caseArtifact.briefing, ...people.map(publicCharacterProfile)]) {
+    for (const declaration of sourceText.split(/[。！？；，,]/u).map((part) => part.trim())) {
+      for (const person of people) {
+        for (const subject of person.id === victim.id ? [person.name, "死者", "受害者"] : [person.name]) {
+          for (const verb of ["的职业是", "担任", "生前是", "是", "为"]) {
+            if (!declaration.startsWith(subject + verb)) continue;
+            const identity = declaration.slice(subject.length + verb.length).trim();
+            if (identity) identities.push({ characterId: person.id, identity, sourceText, declaration });
+          }
+        }
+      }
+    }
+  }
+  return identities;
+}
+
+function publicIdentityReply(caseArtifact: CaseArtifact, characterId: string) {
+  const character = caseArtifact.characters.find((candidate) => candidate.id === characterId);
+  const victim = caseArtifact.characters.find((candidate) => candidate.id === caseArtifact.victimId);
+  if (!character || !victim) return undefined;
+  const identities = getPublicDialogueIdentities(caseArtifact, characterId).filter((identity) => identity.characterId === victim.id);
+  const identity = identities.find((candidate) => candidate.identity !== victim.occupation) ?? identities[0];
+  return `我是${character.occupation}；${victim.name}是${identity.identity}。`;
+}
+
+function buildGroundedFollowUp(
+  input: {
+    caseArtifact: CaseArtifact;
+    character: CaseArtifact["characters"][number];
+    playerText: string;
+    allowedClaims: CaseArtifact["claims"];
+  },
+  session: GameSession,
+) {
+  const question = normalizeDialogueText(resolveDialogueQuestion(session, input.character.id, input.playerText));
+  if (!isVerificationFollowUp(question)) return null;
+  const history = session.dialogue
+    .filter((exchange) => exchange.characterId === input.character.id)
+    .slice(-8);
+  const priorClaimIds = history.findLast(
+    (exchange) => exchange.disclosedClaimIds.length > 0,
+  )?.disclosedClaimIds ?? [];
+  const priorClaims = input.allowedClaims.filter((claim) => priorClaimIds.includes(claim.id));
+  const disclosedClaimIds = [
+    ...history.flatMap((exchange) => exchange.disclosedClaimIds),
+    ...history.flatMap((exchange) => matchingAuthorizedClaimIds(input.caseArtifact, session, input.character.id, exchange.utterance)),
+  ];
+  const priorTopic = priorClaims.map((claim) => claim.statement).join(" ") ||
+    history.at(-1)?.utterance || "";
+  const contradiction = input.caseArtifact.evidence.find(
+    (evidence) =>
+      session.presentedEvidenceByCharacter[input.character.id]?.includes(evidence.id) &&
+      evidence.contradictsClaimIds.some((id) => disclosedClaimIds.includes(id)) &&
+      (question.includes(normalizeDialogueText(evidence.name)) || /矛盾|对不上|不符|解释/u.test(question)),
+  );
+  if (contradiction) {
+    return {
+      hasGroundedDetail: true,
+      response: {
+        utterance: `你出示的${contradiction.name}和我刚才的说法有冲突，这一点我现在还解释不了。`,
+        demeanor: "guarded" as const,
+        disclosedClaimIds: [],
+      },
+    };
+  }
+
+  const asksTime = isEventTimeQuestion(question);
+  const asksWitnessTime = asksTime && /见|看|证人|作证|见证/u.test(question);
+  const proofDetail = /证明|作证|见证|看见|看到|见到|陪|一起|独自|单独|没有人|没人|无人|监控|门禁|记录/u;
+  const timeDetail = /\d{1,2}[:：点时]|[零〇一二两三四五六七八九十]{1,3}[点时]|具体时间|记不清/u;
+  const sources = getDialogueGroundingSources(input.caseArtifact, session, input.character.id);
+  const namedWitnesses = [
+    ...input.caseArtifact.characters.map((character) => character.name),
+    ...sources.flatMap((source) => Array.from(source.statement.matchAll(/(?:^|[。！？；，,])([\p{Script=Han}]{2,8}?)(?=在|于|曾|看见|看到|见到|能|可以)/gu), (match) => match[1])),
+    ...Array.from(question.matchAll(/(?:老|小)[\p{Script=Han}]/gu), (match) => match[0]),
+  ].filter((name) => question.includes(name));
+  const candidates = sources
+    .filter((source) => !source.contextOnly)
+    .filter((source) =>
+      (namedWitnesses.length > 0 && namedWitnesses.some((name) => source.statement.includes(name))) ||
+      priorClaimIds.includes(source.claimId) ||
+      priorClaims.some((prior) => prior.factIds.some((id) => source.factIds.includes(id))) ||
+      dialogueTopicOverlapScore(normalizeDialogueText(priorTopic), source.statement) >= 3 ||
+      (!priorTopic && dialogueTopicOverlapScore(question, source.statement) >= 2),
+    )
+    // 时间与否定可能在逗号/分号后，必须保留完整命题，不能把“没有见到”切成一次目击。
+    .map((source) => ({ source, statement: source.statement }))
+    .filter(({ statement }) => namedWitnesses.length === 0 || namedWitnesses.some((name) => statement.includes(name)))
+    .filter(({ statement }) => asksTime
+      ? timeDetail.test(statement) && (!asksWitnessTime || /看见|看到|见到|作证|见证/u.test(statement))
+      : proofDetail.test(statement))
+    .sort((left, right) =>
+      Number(/证明|作证|见证/u.test(right.statement)) - Number(/证明|作证|见证/u.test(left.statement)) ||
+      dialogueTopicOverlapScore(question, right.statement) - dialogueTopicOverlapScore(question, left.statement),
+    );
+  const detail = candidates[0];
+  const recordProof = detail?.statement.match(/监控(?:录像)?|门禁(?:记录)?|录像|通话记录|记录/u)?.[0];
+  const asksWholePeriod = /整晚|整夜|整个晚上|全程|一直|始终|没离开|未离开/u.test(question);
+  if (!asksTime && asksWholePeriod && detail) {
+    const continuous = /整晚|整夜|整个晚上|全程|一直|始终/u.test(detail.statement);
+    const original = /[。！？!?]$/u.test(detail.statement.trim()) ? detail.statement.trim() : `${detail.statement.trim()}。`;
+    const repeated = history.at(-1)?.utterance.includes(original);
+    return {
+      hasGroundedDetail: true,
+      response: {
+        utterance: continuous
+          ? repeated && recordProof
+            ? `整晚的情况，你可以核对${recordProof}；具体的证明人，我现在无法确认。`
+            : `${original}${recordProof ? `具体人证我无法确认，你可以核对${recordProof}。` : ""}`
+          : `${original}这只能说明其中那个时点，不能作为整晚都在场的证明。`,
+        demeanor: "guarded" as const,
+        disclosedClaimIds: detail.source.claimId ? [detail.source.claimId] : [],
+      },
+    };
+  }
+  if (!asksTime && /谁|人证|证人/u.test(question) && recordProof &&
+    !/看见|看到|见到|见证|作证|一起|陪|独自|单独|没有人|没人|无人/u.test(detail!.statement)) {
+    const repeated = history.some((exchange) => /具体谁|具体见证人/u.test(exchange.utterance));
+    return {
+      hasGroundedDetail: false,
+      response: {
+        utterance: repeated
+          ? `具体见证人我确实说不准；你可以先核对${recordProof}。`
+          : `我说的证明是${recordProof}；具体谁能替我作证，我现在无法确认。`,
+        demeanor: "guarded" as const,
+        disclosedClaimIds: [],
+      },
+    };
+  }
+  const detailStatement = detail && (/[。！？!?]$/u.test(detail.statement.trim()) ? detail.statement.trim() : `${detail.statement.trim()}。`);
+  const alternatives = detail
+    ? asksTime
+      ? [`关于你问的时间，${detailStatement}`, `时间这一点，我能说明的是：${detailStatement}`]
+      : [`就你问的证明，${detailStatement}`, `关于证明，我能说明的仍是：${detailStatement}`]
+    : asksTime
+      ? ["具体几点，我没有能确认的信息，不能给你一个确定的时间。", "你追问的这个时间，我目前还是无法确认。"]
+      : /监控|门禁|录像|记录/u.test(question) && !/谁|人证|证人|见证/u.test(question)
+        ? ["能核实这段行踪的记录，我目前无法确认。", "具体能查到哪份记录，还需要核对，我现在说不准。"]
+      : /谁|人证|证人|作证|证明|见证|他|她/u.test(question)
+        ? ["关于这段行踪，我目前提供不了可以核实的人证信息。", "具体谁能作证，我还是无法确认，不能随便指个人。"]
+        : ["你要核实的这个细节，我目前没有可以确认的信息。", "这一点还需要核实，我现在无法补充确定的细节。"];
+  const utterance = alternatives.find((candidate) => !history.some((exchange) => exchange.utterance === candidate)) ??
+    alternatives.find((candidate) => history.at(-1)?.utterance !== candidate) ?? alternatives[0];
+  return {
+    hasGroundedDetail: Boolean(detail),
+    response: {
+      utterance,
+      demeanor: "guarded" as const,
+      disclosedClaimIds: detail?.source.claimId ? [detail.source.claimId] : [],
+    },
   };
 }
 
@@ -1035,7 +1343,7 @@ function findQuestionMatchedLieRule(
   playerText: string,
 ) {
   const normalizedQuestion = normalizeDialogueText(playerText);
-  if (normalizedQuestion.length < 2) return undefined;
+  if (normalizedQuestion.length < 2 || isVerificationFollowUp(normalizedQuestion) || dialogueBackgroundTopic(normalizedQuestion)) return undefined;
   const directChallenge = isDirectChallenge(normalizedQuestion);
 
   return character.lieRules
@@ -1059,10 +1367,44 @@ function isDirectChallenge(normalizedQuestion: string) {
   );
 }
 
-function isVerificationFollowUp(normalizedQuestion: string) {
-  return /证明|证据|核实|查|记录|监控|门禁|谁看见|谁知道/u.test(
-    normalizedQuestion,
-  );
+export function isVerificationFollowUp(question: string) {
+  if (isRoutineWorkQuestion(question)) return false;
+  return isProofOrTimeQuestion(question) || /核实|矛盾|对不上|不符|出示|(?:证据|记录|监控).{0,8}(?:显示|表明|解释)/u.test(question);
+}
+
+export function isProofOrTimeQuestion(question: string) {
+  if (isRoutineWorkQuestion(question)) return false;
+  return /证明|谁.{0,8}(?:见|看|知道)|作证|证人|见证|人证|(?:有没有|有无|有什么).{0,4}(?:监控|门禁|记录)|(?:什么|哪些|哪份|哪条|查|调取|提供).{0,6}(?:监控|门禁|录像|记录)|(?:监控|门禁|录像|记录).{0,6}(?:拍到|显示|查到|核实|调取)/u.test(question) || isEventTimeQuestion(question);
+}
+
+function isRoutineWorkQuestion(question: string) {
+  return /平时|平常|日常|通常|工作上|工作职责/u.test(question) &&
+    !/案发|那晚|当晚|那天|当天|当时|行踪|不在场/u.test(question);
+}
+
+function isEventTimeQuestion(question: string) {
+  // 任职年限和人物关系属于背景问题，不能仅凭“多久”或代词转成案发证明。
+  if (/关系|认识|来往|相处|工龄|工作年限|任职|入职|开始.{0,8}(?:工作|上班)/u.test(question)) return false;
+  return /几点|何时|什么时候|什么时间|哪个时间|(?:当晚|那晚|案发|当时|那天).{0,16}(?:多久|多长时间)|(?:待|停留|逗留|在场|离开).{0,6}(?:多久|多长时间)/u.test(question);
+}
+
+function dialogueBackgroundTopic(question: string): "tenure" | "relationship" | undefined {
+  if (/工龄|工作年限|(?:上班|工作|任职|入职|干了).{0,8}(?:多久|多长|几年|多少年)|(?:多久|几年|多少年).{0,8}(?:上班|工作|任职|入职)/u.test(question)) return "tenure";
+  if (/关系|认识|来往|相处|交情/u.test(question)) return "relationship";
+}
+
+function matchesBackgroundTopic(topic: ReturnType<typeof dialogueBackgroundTopic>, statement: string) {
+  if (topic === "tenure") return /工龄|入职|任职|工作.{0,6}[零〇一二两三四五六七八九十百\d]+年|(?:任|做|从事).{0,16}(?:年|月)|(?:上班|工作).{0,6}(?:年|月)|(?:年|月).{0,6}(?:上班|工作)/u.test(statement);
+  if (topic === "relationship") return /关系|朋友|同事|同学|亲戚|夫妻|父女|母女|认识|来往|相处|邻居|合伙|女儿|儿子|妻子|丈夫|雇主/u.test(statement);
+  return true;
+}
+
+export function resolveDialogueQuestion(session: GameSession, characterId: string, playerText: string) {
+  const repeatQuestion = /^(?:请|那)?(?:再问一次|再说一遍|再讲一遍|重复一遍|重复一下|重说一遍)[吧呢吗]?$/u;
+  if (!repeatQuestion.test(normalizeDialogueText(playerText))) return playerText;
+  return session.dialogue.findLast((exchange) =>
+    exchange.characterId === characterId && !repeatQuestion.test(normalizeDialogueText(exchange.playerText)),
+  )?.playerText ?? playerText;
 }
 
 function dialogueTopicOverlapScore(question: string, source: string) {
@@ -1114,7 +1456,6 @@ function legacyDialogueReplacement(
     character,
     playerText: exchange.playerText,
     allowedClaims: previouslyVisibleClaims,
-    knownClaimIds: previouslyVisibleClaimIds,
   }).utterance;
 }
 
@@ -1209,7 +1550,11 @@ export function requestHint(
         (candidate) => candidate.targetFactId === command.targetFactId,
       )
     : caseArtifact.hintChains.find(
-        (candidate) => !discoveredFactIds.has(candidate.targetFactId),
+        (candidate) =>
+          !discoveredFactIds.has(candidate.targetFactId) &&
+          (session.hintLevelsByChainId[candidate.id] ?? 0) < candidate.hints.length,
+      ) ?? caseArtifact.hintChains.find(
+        (candidate) => (session.hintLevelsByChainId[candidate.id] ?? 0) < candidate.hints.length,
       ) ?? caseArtifact.hintChains[0];
   const currentLevel = hintChain
     ? (session.hintLevelsByChainId[hintChain.id] ?? 0)
@@ -1668,7 +2013,10 @@ export function getPlayerCaseView(
       id: caseArtifact.id,
       title: caseArtifact.title,
       briefing: caseArtifact.briefing,
-      setting: caseArtifact.setting,
+      setting: {
+        era: caseArtifact.setting.era,
+        place: caseArtifact.setting.place,
+      },
       victim: victim ? publicCharacter(victim) : null,
     },
     characters: caseArtifact.characters
@@ -1693,9 +2041,9 @@ export function getPlayerCaseView(
     evidence: discoveredEvidence.map((evidence) =>
       playerFacingEvidence(caseArtifact, evidence, hasConfirmedConclusion),
     ),
-    claims: caseArtifact.claims.filter((claim) =>
-      session.discoveredClaimIds.includes(claim.id),
-    ),
+    claims: caseArtifact.claims
+      .filter((claim) => session.discoveredClaimIds.includes(claim.id))
+      .map((claim) => ({ id: claim.id, speakerId: claim.speakerId, statement: claim.statement })),
     dialogue,
     deductions: caseArtifact.facts
       .filter((fact) => discoveredFactIds.has(fact.id))
@@ -1742,7 +2090,6 @@ export function getPlayerCaseView(
       timelineEvents: hasConfirmedConclusion
         ? caseArtifact.timeline.map((event) => ({
             id: event.id,
-            timestamp: event.timestamp,
             description: redactTimelineForPlayer(caseArtifact, event.description),
           }))
         : [],
@@ -2131,7 +2478,7 @@ function investigationIntentMatches(
   if (evidence.discovery.method === "interview" && !options.allowInterview) {
     return false;
   }
-  if (command.sceneId && evidence.discovery.sceneId !== command.sceneId) {
+  if (command.sceneId && evidence.discovery.sceneId && evidence.discovery.sceneId !== command.sceneId) {
     return false;
   }
   if (command.objectId && evidence.discovery.objectId !== command.objectId) {
@@ -2191,6 +2538,47 @@ export function evidenceIsAvailable(
   );
 }
 
+export function factCanBeDisclosed(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  factId: string,
+): boolean {
+  const character = caseArtifact.characters.find((candidate) => candidate.id === characterId);
+  if (!character || !caseArtifact.facts.some((fact) => fact.id === factId)) return false;
+  const supportingEvidence = caseArtifact.evidence.filter((evidence) => evidence.supportsFactIds.includes(factId));
+  const presented = session.presentedEvidenceByCharacter[characterId] ?? [];
+  const hasPresentedEvidence = supportingEvidence.some((evidence) => presented.includes(evidence.id));
+  if (!character.knowledge.factIds.includes(factId) && !hasPresentedEvidence) return false;
+
+  const interviewEvidence = supportingEvidence.filter((evidence) =>
+    evidence.discovery.method === "interview" && evidence.discovery.characterId === characterId,
+  );
+  const interviewUnlocked = interviewEvidence.some((evidence) =>
+    session.discoveredEvidenceIds.includes(evidence.id) || evidenceIsAvailable(caseArtifact, session, evidence.id),
+  );
+  if (interviewEvidence.length > 0 && !interviewUnlocked && !hasPresentedEvidence) return false;
+
+  // 知道秘密不等于获准披露；没有对应 claim 的秘密也必须遵守同一解锁边界。
+  return !character.secretFactIds.includes(factId) || interviewUnlocked ||
+    supportingEvidence.some((evidence) => session.discoveredEvidenceIds.includes(evidence.id) || presented.includes(evidence.id));
+}
+
+export function dialogueEvidenceCanBeDisclosed(
+  caseArtifact: CaseArtifact,
+  session: GameSession,
+  characterId: string,
+  evidenceId: string,
+): boolean {
+  const character = caseArtifact.characters.find((candidate) => candidate.id === characterId);
+  const evidence = caseArtifact.evidence.find((candidate) => candidate.id === evidenceId);
+  if (!character || !evidence) return false;
+  if (session.presentedEvidenceByCharacter[characterId]?.includes(evidenceId)) return true;
+  return character.knowledge.evidenceIds.includes(evidenceId) &&
+    (evidence.discovery.method !== "interview" || evidenceIsAvailable(caseArtifact, session, evidenceId)) &&
+    evidence.supportsFactIds.every((factId) => !character.secretFactIds.includes(factId) || factCanBeDisclosed(caseArtifact, session, characterId, factId));
+}
+
 export function claimCanBeDisclosed(
   caseArtifact: CaseArtifact,
   session: GameSession,
@@ -2206,7 +2594,8 @@ export function claimCanBeDisclosed(
     !character ||
     !claim ||
     claim.speakerId !== character.id ||
-    !character.knowledge.claimIds.includes(claim.id)
+    !character.knowledge.claimIds.includes(claim.id) ||
+    (claim.kind !== "lie" && claim.factIds.some((factId) => !factCanBeDisclosed(caseArtifact, session, characterId, factId)))
   ) {
     return false;
   }
@@ -2343,7 +2732,7 @@ function publicCharacter(character: CaseArtifact["characters"][number]) {
     name: character.name,
     roleTier: character.roleTier,
     occupation: character.occupation,
-    publicProfile: character.publicProfile,
+    publicProfile: publicCharacterProfile(character),
     portraitTags: character.portraitTags,
   };
 }

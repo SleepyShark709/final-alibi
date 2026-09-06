@@ -8,6 +8,8 @@ import type {
 import type { CaseArtifact } from "@/domain/case/case-artifact";
 import { validatePublishableCaseArtifact } from "@/domain/case/case-validator";
 import {
+  buildDeterministicDialogueShortcut,
+  evidenceIsAvailable,
   getPlayerCaseView,
   performInvestigation,
   recordDialogueTurn,
@@ -18,6 +20,10 @@ import {
 
 import { createCaseGenerationGraph } from "./case-generation-graph";
 import { makeGeneratedCaseArtifact } from "./testing/make-generated-case-artifact";
+import { ScriptedBlindProtocol } from "./testing/scripted-blind-protocol";
+import { scriptEvidenceReview } from "./testing/scripted-evidence-review";
+import { buildEvidenceReviewBatches } from "./evidence-review-batches";
+import { buildEvidenceReviewPlan } from "./evidence-review";
 
 describe("generated case release gate stress", () => {
   it("publishes and completes ten consecutive constrained cases", async () => {
@@ -52,6 +58,7 @@ describe("generated case release gate stress", () => {
         modelCalls: [],
       });
       expect(generated.finalArtifact).not.toBeNull();
+      expect(generated.modelCalls.map((call) => call.task)).toEqual(["case_draft", "opening_review", ...buildEvidenceReviewBatches(buildEvidenceReviewPlan(generated.finalArtifact!)).map(() => "evidence_review"), "blind_solve"]);
       const released = generated.finalArtifact!;
       expect(validatePublishableCaseArtifact(released).valid).toBe(true);
       expect(JSON.stringify(getPlayerCaseView(released, startGame(released)))).not.toMatch(
@@ -62,6 +69,9 @@ describe("generated case release gate stress", () => {
         released,
         startGame(released, { sessionId: `game_stress_${index}` }),
       );
+      expect(investigated.discoveredEvidenceIds).toEqual(expect.arrayContaining(released.solution.requiredEvidenceIds));
+      const requiredInterviewIds = released.evidence.filter((evidence) => released.solution.requiredEvidenceIds.includes(evidence.id) && evidence.discovery.method === "interview").map((evidence) => evidence.id);
+      expect(investigated.dialogue.flatMap((exchange) => exchange.discoveredEvidenceIds)).toEqual(expect.arrayContaining(requiredInterviewIds));
       const submitted = submitCaseReport(released, investigated, {
         commandId: `report_stress_${index}`,
         culpritId: released.solution.culpritId,
@@ -85,12 +95,16 @@ describe("generated case release gate stress", () => {
 });
 
 class StressProvider implements StructuredModelProvider {
+  private readonly blindProtocol = new ScriptedBlindProtocol();
   constructor(private readonly responses: unknown[]) {}
 
   async invokeStructured<T extends Record<string, unknown>>(
     request: StructuredModelRequest<T>,
   ): Promise<StructuredModelResult<T>> {
-    const response = this.responses.shift();
+    const scripted = request.schemaName === "case_opening_review" || request.schemaName === "case_evidence_review"
+      ? { issues: [] }
+      : this.responses.shift();
+    const response = this.blindProtocol.reply(request, scriptEvidenceReview(request, scripted));
     if (response === undefined) throw new Error("stress response exhausted");
     return {
       value: request.schema.parse(response),
@@ -102,46 +116,34 @@ class StressProvider implements StructuredModelProvider {
 }
 
 function discoverRequiredEvidence(caseArtifact: CaseArtifact, initial: GameSession) {
-  const actions = [
-    ["tea", "化验茶水", "scene_study"],
-    ["bookend", "检查黄铜书挡", "scene_study"],
-    ["ledger", "翻找书桌抽屉", "scene_study"],
-    ["paint", "核实沈岚的不在场证明", undefined],
-    ["memo", "检查碎纸篓", "scene_study"],
-    ["lock", "恢复门禁日志", "scene_security_room"],
-    ["camera", "逐帧查看监控", "scene_security_room"],
-  ] as const;
-  const investigated = actions.reduce(
-    (session, [suffix, text, sceneId]) =>
-      performInvestigation(caseArtifact, session, {
-        commandId: `stress_${initial.id}_${suffix}`,
-        text,
-        sceneId,
-      }).session,
-    initial,
-  );
-  const afterHousekeeper = recordDialogueTurn(caseArtifact, investigated, {
-    commandId: `stress_${initial.id}_ask_housekeeper`,
-    characterId: "character_luo_fang",
-    playerText: "询问罗芳谁送了茶",
-    response: {
-      utterance: "李闻舟主动接过茶盘，说要替我送上二楼。",
-      demeanor: "cooperative",
-      disclosedClaimIds: ["claim_luo_tea"],
-      memorySummary: "罗芳确认了茶盘被李闻舟接走的经过。",
-      stateDelta: { trust: 4, pressure: 1, alertness: 0 },
-    },
-  });
-  return recordDialogueTurn(caseArtifact, afterHousekeeper.session, {
-    commandId: `stress_${initial.id}_ask_han`,
-    characterId: "character_han_zhuo",
-    playerText: "货梯记录显示了什么",
-    response: {
-      utterance: "货梯日志显示赵衡在案发时只往返一楼和地下仓库，没有到过二楼。",
-      demeanor: "cooperative",
-      disclosedClaimIds: ["claim_han_logs"],
-      memorySummary: "韩卓核实了赵衡的货梯行程。",
-      stateDelta: { trust: 2, pressure: 1, alertness: 0 },
-    },
-  }).session;
+  let session = initial;
+  const pending = new Set(caseArtifact.evidence.map((evidence) => evidence.id));
+  // 逆序尝试声明的路径，避免 fixture 的排列顺序掩盖真实前置关系。
+  while (pending.size > 0) {
+    let progress = false;
+    for (const evidence of [...caseArtifact.evidence].reverse()) {
+      if (!pending.has(evidence.id) || !evidenceIsAvailable(caseArtifact, session, evidence.id)) continue;
+      const { discovery } = evidence;
+      const commandId = `stress_${initial.id}_${evidence.id}`;
+      if (discovery.method === "interview") {
+        const playerText = discovery.dialogueAliases![0]!;
+        const characterId = discovery.characterId!;
+        const response = buildDeterministicDialogueShortcut(caseArtifact, session, characterId, playerText);
+        expect(response, `declared interview ${evidence.id} must produce its testimony`).not.toBeNull();
+        session = recordDialogueTurn(caseArtifact, session, { commandId, characterId, playerText, response: response! }).session;
+      } else {
+        session = performInvestigation(caseArtifact, session, {
+          commandId,
+          text: discovery.actionAliases[0]!,
+          sceneId: discovery.sceneId,
+          characterId: discovery.characterId,
+        }).session;
+      }
+      expect(session.discoveredEvidenceIds, `declared path failed for ${evidence.id}`).toContain(evidence.id);
+      pending.delete(evidence.id);
+      progress = true;
+    }
+    expect(progress, `unreachable declared paths: ${[...pending].join(", ")}`).toBe(true);
+  }
+  return session;
 }

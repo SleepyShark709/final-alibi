@@ -23,6 +23,7 @@ import {
   gameSessions,
   jobs,
   modelRuns,
+  serverSecrets,
 } from "@/infrastructure/db/schema";
 
 export type CaseSource = "tutorial" | "generated" | "imported";
@@ -123,6 +124,7 @@ export interface JobView {
 }
 
 export interface StartModelRunInput {
+  id?: string;
   sessionId?: string;
   caseId?: string;
   commandId?: string;
@@ -158,7 +160,23 @@ export class PersistenceError extends Error {
  * LangGraph checkpoint 只保存一次 Agent 执行的恢复游标，不能拿来替代这些记录。
  */
 export class GameRepository {
+  private playerProtocolKey?: Promise<string>;
+
   constructor(private readonly database: DatabaseHandle) {}
+
+  getPlayerProtocolKey(): Promise<string> {
+    this.playerProtocolKey ??= this.loadPlayerProtocolKey();
+    return this.playerProtocolKey;
+  }
+
+  private async loadPlayerProtocolKey() {
+    const name = "player_protocol_hmac_v1";
+    // 与案卷一起持久化；并发进程只能插入一份，随后均读取同一个获胜值。
+    await this.database.db.insert(serverSecrets).values({ name, value: randomBytes(32).toString("base64url") }).onConflictDoNothing();
+    const [secret] = await this.database.db.select({ value: serverSecrets.value }).from(serverSecrets).where(eq(serverSecrets.name, name)).limit(1);
+    if (!secret) throw new Error("Player protocol key could not be initialized");
+    return secret.value;
+  }
 
   async createAnonymousIdentity(now = new Date().toISOString()): Promise<AnonymousIdentity> {
     const playerId = `player_${randomUUID().replaceAll("-", "")}`;
@@ -907,8 +925,8 @@ export class GameRepository {
 
   async startModelRun(input: StartModelRunInput): Promise<string> {
     // 审计记录保存请求摘要、模型与 token 成本；不要在此处写入 API key。
-    const id = `modelrun_${randomUUID().replaceAll("-", "")}`;
-    await this.database.db.insert(modelRuns).values({
+    const id = input.id ?? `modelrun_${randomUUID().replaceAll("-", "")}`;
+    const insert = this.database.db.insert(modelRuns).values({
       id,
       sessionId: input.sessionId,
       caseId: input.caseId,
@@ -922,6 +940,11 @@ export class GameRepository {
       requestJson: input.request,
       createdAt: input.now ?? new Date().toISOString(),
     });
+    if (input.id && input.caseId) {
+      await insert.onConflictDoUpdate({ target: modelRuns.id, set: { caseId: input.caseId } });
+    } else {
+      await insert.onConflictDoNothing({ target: modelRuns.id });
+    }
     return id;
   }
 

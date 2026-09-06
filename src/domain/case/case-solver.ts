@@ -46,7 +46,9 @@ export function solveCaseWithEvidenceIds(
   const relevantEvidence = reachableEvidence.filter(
     (evidence) =>
       evidence.implicatesCharacterIds.some((id) => candidateIds.includes(id)) ||
-      evidence.excludesCharacterIds.some((id) => suspectIds.includes(id)),
+      evidence.excludesCharacterIds.some((id) => suspectIds.includes(id)) ||
+      evidence.supportsFactIds.includes(caseArtifact.solution.motiveFactId) ||
+      evidence.supportsFactIds.includes(caseArtifact.solution.methodFactId),
   );
   const supportedFactIds = [
     ...new Set(relevantEvidence.flatMap((evidence) => evidence.supportsFactIds)),
@@ -61,15 +63,12 @@ export function solveCaseWithEvidenceIds(
   }
 
   const culpritId = candidateIds[0];
-  const supportedFactTypes = new Set(
-    caseArtifact.facts
-      .filter((fact) => supportedFactIds.includes(fact.id))
-      .map((fact) => fact.type),
-  );
   const hasCompleteCase =
     implicatedIds.has(culpritId) &&
-    supportedFactTypes.has("motive") &&
-    supportedFactTypes.has("method");
+    caseArtifact.facts.some((fact) => fact.id === caseArtifact.solution.motiveFactId && fact.type === "motive") &&
+    caseArtifact.facts.some((fact) => fact.id === caseArtifact.solution.methodFactId && fact.type === "method") &&
+    supportedFactIds.includes(caseArtifact.solution.motiveFactId) &&
+    supportedFactIds.includes(caseArtifact.solution.methodFactId);
 
   return result(hasCompleteCase ? "unique" : "unsupported", culpritId);
 

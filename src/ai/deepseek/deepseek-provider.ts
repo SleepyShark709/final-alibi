@@ -88,23 +88,28 @@ export class DeepSeekModelProvider implements StructuredModelProvider {
     }
 
     const modelName = this.modelName(request.tier);
+    // 同一模型请求的重试共享总时限，不能每次重试重新消耗完整超时窗口。
+    const deadline = AbortSignal.timeout(this.options.timeoutMs);
+    const signal = request.signal ? AbortSignal.any([request.signal, deadline]) : deadline;
+    const reasoning = request.reasoning === true;
     const model = new ChatDeepSeek({
       apiKey: this.options.apiKey,
       model: modelName,
-      temperature: request.temperature ?? 0.2,
+      ...(reasoning ? {} : { temperature: request.temperature ?? 0.2 }),
       maxTokens: request.maxTokens,
-      maxRetries: this.options.maxRetries,
+      maxRetries: request.maxRetries ?? this.options.maxRetries,
       timeout: this.options.timeoutMs,
       configuration: { baseURL: this.options.baseUrl },
-      // DeepSeek V4 默认启用 Thinking；LangChain 的 functionCalling structured output 会发送
-      // tool_choice，而该组合会被 DeepSeek 拒绝。所有本项目模型调用都是结构化调用，
-      // 因此在请求层显式关闭 Thinking，换取稳定、可校验的 JSON/tool 输出。
-      modelKwargs: { thinking: { type: "disabled" } },
+      // Thinking 不接受 temperature，且 functionCalling 会引入 tool_choice；显式推理
+      // 请求因此走无工具的 JSON mode。其余调用维持原来的关闭状态与采样行为。
+      modelKwargs: {
+        thinking: { type: reasoning ? "enabled" : "disabled" },
+        ...(reasoning ? { reasoning_effort: request.reasoningEffort ?? "high" } : {}),
+      },
     });
-    const structuredMethod = resolveDeepSeekStructuredMethod(
-      modelName,
-      this.options.structuredMethod,
-    );
+    const structuredMethod = reasoning
+      ? "jsonMode"
+      : resolveDeepSeekStructuredMethod(modelName, this.options.structuredMethod);
     const messages = toStructuredMessages(
       request.messages,
       structuredMethod,
@@ -119,7 +124,7 @@ export class DeepSeekModelProvider implements StructuredModelProvider {
           outputVersion: "v0",
           response_format: { type: "json_object" },
         })
-        .invoke(messages, { signal: request.signal });
+        .invoke(messages, { signal });
       const parsed = parseJsonMessage(raw);
       if (parsed === null) {
         throw noParseableJsonError(request.schemaName, modelName, raw);
@@ -147,7 +152,7 @@ export class DeepSeekModelProvider implements StructuredModelProvider {
     });
     const result = await runnable.invoke(
       messages,
-      { signal: request.signal },
+      { signal },
     );
     // function-calling 响应若缺少 tool call，LangChain 会返回 parsed=null；把这类
     // Provider 边界错误与 schema 字段错误区分开，避免 Worker 只留下模糊的 Zod 报错。
@@ -371,10 +376,17 @@ function extractUsage(message: BaseMessage): ModelUsage {
 }
 
 function serializeMessage(message: BaseMessage): Record<string, unknown> {
+  const {
+    reasoning_content: reasoningContent,
+    ...additionalKwargs
+  } = message.additional_kwargs;
   return {
     id: message.id,
     content: message.content,
-    additionalKwargs: message.additional_kwargs,
+    additionalKwargs,
+    ...(typeof reasoningContent === "string"
+      ? { reasoningContentChars: reasoningContent.length }
+      : {}),
     responseMetadata: message.response_metadata,
     ...(isAIMessage(message)
       ? {

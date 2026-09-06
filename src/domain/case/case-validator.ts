@@ -62,6 +62,16 @@ export function validateCaseArtifact(
   const culprit = caseArtifact.characters.find(
     (character) => character.id === caseArtifact.culpritId,
   );
+  for (const [field, type] of [["motiveFactId", "motive"], ["methodFactId", "method"]] as const) {
+    const fact = caseArtifact.facts.find((candidate) => candidate.id === caseArtifact.solution[field]);
+    if (fact && fact.type !== type) {
+      issues.push({
+        code: "invalid_solution_fact_type",
+        path: `solution.${field}`,
+        message: `${field} must reference a ${type} fact, but "${fact.id}" is ${fact.type}`,
+      });
+    }
+  }
   if (culprit && culprit.roleTier !== "suspect") {
     issues.push({
       code: "invalid_character_role",
@@ -111,11 +121,11 @@ export function validateCaseArtifact(
   const suspectCount = caseArtifact.characters.filter(
     (character) => character.roleTier === "suspect",
   ).length;
-  if (suspectCount !== 4) {
+  if (suspectCount < 3 || suspectCount > 5) {
     issues.push({
       code: "invalid_suspect_count",
       path: "characters",
-      message: `expected exactly 4 suspects but found ${suspectCount}`,
+      message: `expected 3 to 5 suspects but found ${suspectCount}`,
     });
   }
 
@@ -123,11 +133,11 @@ export function validateCaseArtifact(
     (character) =>
       character.roleTier === "witness" || character.roleTier === "referenced",
   ).length;
-  if (supportingCharacterCount < 2 || supportingCharacterCount > 4) {
+  if (supportingCharacterCount < 1 || supportingCharacterCount > 4) {
     issues.push({
       code: "invalid_supporting_character_count",
       path: "characters",
-      message: `expected 2 to 4 supporting characters but found ${supportingCharacterCount}`,
+      message: `expected 1 to 4 supporting characters but found ${supportingCharacterCount}`,
     });
   }
 
@@ -187,10 +197,19 @@ export function validateCaseArtifact(
       message: "discoverable evidence excludes every suspect",
     });
   } else if (solutionResult.status === "unsupported") {
+    const missingFactIds = [caseArtifact.solution.motiveFactId, caseArtifact.solution.methodFactId]
+      .filter((id) => !solutionResult.supportedFactIds.includes(id));
+    const hasCulpritImplication = caseArtifact.evidence.some((evidence) =>
+      reachableEvidenceIds.has(evidence.id) && evidence.implicatesCharacterIds.includes(caseArtifact.culpritId),
+    );
+    const missingRelations = [
+      ...(missingFactIds.length > 0 ? [`missing supportsFactIds: ${missingFactIds.join(", ")}`] : []),
+      ...(!hasCulpritImplication ? [`missing implicatesCharacterIds: ${caseArtifact.culpritId}`] : []),
+    ];
     issues.push({
       code: "incomplete_solution",
       path: "evidence",
-      message: "discoverable evidence lacks a complete motive and method chain",
+      message: `discoverable evidence lacks a complete proof chain${missingRelations.length > 0 ? `; ${missingRelations.join("; ")}` : ""}`,
     });
   } else if (solutionResult.culpritId !== caseArtifact.culpritId) {
     issues.push({
@@ -215,7 +234,10 @@ export function validateCaseArtifact(
         code: "insufficient_required_evidence_chain",
         path: "solution.requiredEvidenceIds",
         message:
-          "the declared required evidence chain must independently identify the culprit, motive, and method",
+          "the declared required evidence chain must independently identify the culprit, motive, and method; " +
+          `missing supportsFactIds: ${[caseArtifact.solution.motiveFactId, caseArtifact.solution.methodFactId]
+            .filter((id) => !requiredChainResult.supportedFactIds.includes(id)).join(", ") || "none"}; ` +
+          `remaining candidates: ${requiredChainResult.candidateIds.join(", ")}`,
       });
     }
   }
@@ -300,6 +322,27 @@ export function validatePublishableCaseArtifact(
       path: "solution.requiredEvidenceIds",
       message:
         "expected at least two critical interview evidence items in the required solution chain",
+    });
+  }
+
+  // 先禁止取得访谈，再计算可达闭包；访谈解锁的文书与场景不能算作零访谈证据。
+  const evidenceWithoutInterviews = findReachableEvidenceIds({
+    ...caseArtifact,
+    evidence: caseArtifact.evidence.filter(
+      (evidence) => evidence.discovery.method !== "interview",
+    ),
+  });
+  const withoutInterviewsResult = solveCaseWithEvidenceIds(
+    caseArtifact,
+    evidenceWithoutInterviews,
+  );
+  if (withoutInterviewsResult.status === "unique") {
+    issues.push({
+      code: "unnecessary_interview_evidence",
+      path: "evidence",
+      message:
+        "evidence reachable without any interview independently identifies the culprit, motive, and method; " +
+        "make an interview supply a necessary contribution or unlock relevant proof, rather than repeat an already complete case",
     });
   }
 

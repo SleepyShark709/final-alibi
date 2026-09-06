@@ -1,0 +1,1113 @@
+{
+  "schemaVersion": 1,
+  "id": "case_58f49137",
+  "seed": "live-final-5-58f49137-a3ab-40d3-b78a-d2e6cfe2ab01",
+  "title": "暴雨封路后的山间旅馆",
+  "briefing": "暴雨导致山体滑坡，通往山间旅馆的唯一公路被阻断，所有住客和员工被困在旅馆内。傍晚时分，旅馆老板在私人书房内被发现死亡，头部有钝器伤。现场门窗紧闭，但书房内一片狼藉。警方因道路中断无法及时赶到，只能由在场人员自行保护现场并配合远程调查。",
+  "setting": {
+    "era": "contemporary",
+    "place": "山间旅馆",
+    "occurredAt": "2025-05-18T18:30:00+08:00"
+  },
+  "victimId": "character_victim",
+  "culpritId": "character_culprit",
+  "characters": [
+    {
+      "id": "character_victim",
+      "name": "陈老板",
+      "roleTier": "victim",
+      "occupation": "旅馆老板",
+      "publicProfile": "旅馆老板，为人精明，最近因经营问题与多人有财务往来。",
+      "privateProfile": "死者，头部遭钝器重击致死。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "middle",
+        "temperament": [
+          "精明",
+          "多疑"
+        ]
+      },
+      "knowledge": {
+        "factIds": [],
+        "evidenceIds": [],
+        "claimIds": []
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_culprit",
+      "name": "林经理",
+      "roleTier": "suspect",
+      "occupation": "旅馆经理",
+      "publicProfile": "负责旅馆日常运营，与老板在工作安排上存在分歧。",
+      "privateProfile": "因被老板克扣年终奖并威胁解雇，怀恨在心。案发时用书房内的铜制镇纸击打老板头部致死。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "middle",
+        "temperament": [
+          "沉稳",
+          "隐忍"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_motive_lin",
+          "fact_method_blunt",
+          "fact_opportunity_lin"
+        ],
+        "evidenceIds": [
+          "evidence_lin_testimony",
+          "evidence_lin_phone",
+          "evidence_lin_contract"
+        ],
+        "claimIds": [
+          "claim_lin_alibi"
+        ]
+      },
+      "secretFactIds": [
+        "fact_motive_lin",
+        "fact_method_blunt",
+        "fact_opportunity_lin"
+      ],
+      "lieRules": [
+        {
+          "factId": "fact_opportunity_lin",
+          "strategy": "fabricate_cover",
+          "coverStatement": "案发时我在自己房间处理邮件，没有去过书房。"
+        }
+      ]
+    },
+    {
+      "id": "character_suspect_2",
+      "name": "王厨师",
+      "roleTier": "suspect",
+      "occupation": "旅馆厨师",
+      "publicProfile": "负责旅馆餐饮，案发时在厨房准备晚餐。",
+      "privateProfile": "曾因老板拖欠工资而愤怒，但案发时在厨房准备晚餐，有不在场证明。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "young",
+        "temperament": [
+          "急躁",
+          "直率"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_alibi_wang"
+        ],
+        "evidenceIds": [
+          "evidence_wang_testimony",
+          "evidence_kitchen_log"
+        ],
+        "claimIds": [
+          "claim_wang_alibi"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_suspect_3",
+      "name": "赵会计",
+      "roleTier": "suspect",
+      "occupation": "旅馆会计",
+      "publicProfile": "负责财务，近期与老板就账目处理方式有不同意见。",
+      "privateProfile": "发现老板做假账，但案发时在办公室核对账目，有监控记录。",
+      "portraitTags": {
+        "gender": "female",
+        "ageGroup": "middle",
+        "temperament": [
+          "谨慎",
+          "细致"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_alibi_zhao"
+        ],
+        "evidenceIds": [
+          "evidence_zhao_testimony",
+          "evidence_office_cctv"
+        ],
+        "claimIds": [
+          "claim_zhao_alibi"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_suspect_4",
+      "name": "孙维修",
+      "roleTier": "suspect",
+      "occupation": "旅馆维修工",
+      "publicProfile": "负责设施维护，近期与老板就维修费用报销流程有不同意见。",
+      "privateProfile": "案发时在锅炉房检修，有工作记录和证人。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "senior",
+        "temperament": [
+          "沉默",
+          "固执"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_alibi_sun"
+        ],
+        "evidenceIds": [
+          "evidence_sun_testimony",
+          "evidence_boiler_log"
+        ],
+        "claimIds": [
+          "claim_sun_alibi"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_suspect_5",
+      "name": "周前台",
+      "roleTier": "suspect",
+      "occupation": "旅馆前台",
+      "publicProfile": "负责接待，近期与老板就排班安排有不同意见。",
+      "privateProfile": "案发时在前台值班，有入住登记记录和监控。",
+      "portraitTags": {
+        "gender": "female",
+        "ageGroup": "young",
+        "temperament": [
+          "活泼",
+          "健谈"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_alibi_zhou"
+        ],
+        "evidenceIds": [
+          "evidence_zhou_testimony",
+          "evidence_front_cctv"
+        ],
+        "claimIds": [
+          "claim_zhou_alibi"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_witness_1",
+      "name": "吴保洁",
+      "roleTier": "witness",
+      "occupation": "旅馆保洁员",
+      "publicProfile": "负责客房和公共区域清洁，案发时在走廊打扫。",
+      "privateProfile": "目击林经理在案发时间前后从书房方向走出，神色慌张。",
+      "portraitTags": {
+        "gender": "female",
+        "ageGroup": "middle",
+        "temperament": [
+          "胆小",
+          "细心"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_opportunity_lin"
+        ],
+        "evidenceIds": [
+          "evidence_wu_testimony"
+        ],
+        "claimIds": [
+          "claim_wu_saw_lin"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    },
+    {
+      "id": "character_witness_2",
+      "name": "郑住客",
+      "roleTier": "witness",
+      "occupation": "旅馆住客",
+      "publicProfile": "长期住客，案发时在房间休息。",
+      "privateProfile": "听到书房方向有争吵声和重物倒地声，时间与案发时间吻合。",
+      "portraitTags": {
+        "gender": "male",
+        "ageGroup": "senior",
+        "temperament": [
+          "温和",
+          "耳背"
+        ]
+      },
+      "knowledge": {
+        "factIds": [
+          "fact_method_blunt"
+        ],
+        "evidenceIds": [
+          "evidence_zheng_testimony"
+        ],
+        "claimIds": [
+          "claim_zheng_heard"
+        ]
+      },
+      "secretFactIds": [],
+      "lieRules": []
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene_study",
+      "name": "书房",
+      "description": "旅馆老板的私人书房，尸体被发现于此。房间内书桌翻倒，文件散落，窗户紧闭。",
+      "initiallyUnlocked": true,
+      "objects": [
+        {
+          "id": "object_body",
+          "name": "尸体",
+          "description": "死者头部有明显钝器伤，身旁有一铜制镇纸，沾有血迹。",
+          "actionAliases": [
+            "检查尸体",
+            "查看死者",
+            "观察伤口"
+          ],
+          "evidenceIds": [
+            "evidence_body_wound",
+            "evidence_paperweight"
+          ]
+        },
+        {
+          "id": "object_desk",
+          "name": "书桌",
+          "description": "书桌抽屉被拉开，文件散落一地。",
+          "actionAliases": [
+            "检查书桌",
+            "查看抽屉",
+            "翻阅文件"
+          ],
+          "evidenceIds": [
+            "evidence_scattered_files"
+          ]
+        },
+        {
+          "id": "object_phone",
+          "name": "手机",
+          "description": "死者手机，屏幕锁定。",
+          "actionAliases": [
+            "查看手机",
+            "尝试解锁",
+            "检查手机"
+          ],
+          "evidenceIds": [
+            "evidence_locked_phone",
+            "evidence_lin_phone"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_kitchen",
+      "name": "厨房",
+      "description": "旅馆厨房，整洁有序，晚餐准备中。",
+      "initiallyUnlocked": false,
+      "objects": [
+        {
+          "id": "object_kitchen_log",
+          "name": "厨房工作日志",
+          "description": "记录员工到岗和备餐时间。",
+          "actionAliases": [
+            "查看日志",
+            "翻阅记录",
+            "检查厨房日志"
+          ],
+          "evidenceIds": [
+            "evidence_kitchen_log"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_office",
+      "name": "办公室",
+      "description": "旅馆办公室，会计和经理共用。",
+      "initiallyUnlocked": false,
+      "objects": [
+        {
+          "id": "object_office_cctv",
+          "name": "办公室监控录像",
+          "description": "办公室门口的监控录像，可回放。",
+          "actionAliases": [
+            "查看监控",
+            "回放录像",
+            "检查监控"
+          ],
+          "evidenceIds": [
+            "evidence_office_cctv"
+          ]
+        },
+        {
+          "id": "object_contract",
+          "name": "劳动合同",
+          "description": "林经理的劳动合同，内有薪资调整条款。",
+          "actionAliases": [
+            "查看合同",
+            "翻阅文件",
+            "检查合同"
+          ],
+          "evidenceIds": [
+            "evidence_lin_contract"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_boiler_room",
+      "name": "锅炉房",
+      "description": "旅馆锅炉房，设备运行中。",
+      "initiallyUnlocked": false,
+      "objects": [
+        {
+          "id": "object_boiler_log",
+          "name": "锅炉检修记录",
+          "description": "记录维修工到岗和检修时间。",
+          "actionAliases": [
+            "查看记录",
+            "翻阅检修日志",
+            "检查锅炉记录"
+          ],
+          "evidenceIds": [
+            "evidence_boiler_log"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_front_desk",
+      "name": "前台",
+      "description": "旅馆前台，有入住登记和监控。",
+      "initiallyUnlocked": false,
+      "objects": [
+        {
+          "id": "object_front_cctv",
+          "name": "前台监控录像",
+          "description": "前台区域的监控录像，可回放。",
+          "actionAliases": [
+            "查看监控",
+            "回放录像",
+            "检查前台监控"
+          ],
+          "evidenceIds": [
+            "evidence_front_cctv"
+          ]
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact_motive_lin",
+      "type": "motive",
+      "statement": "林经理因被克扣年终奖并威胁解雇而对老板怀恨在心。"
+    },
+    {
+      "id": "fact_method_blunt",
+      "type": "method",
+      "statement": "凶手使用书房内的铜制镇纸多次击打死者头部，致其死亡。"
+    },
+    {
+      "id": "fact_opportunity_lin",
+      "type": "opportunity",
+      "statement": "林经理在案发时间前后出现在书房附近，且其不在场证明不成立。"
+    },
+    {
+      "id": "fact_alibi_wang",
+      "type": "alibi",
+      "statement": "王厨师在案发时间在厨房准备晚餐，有工作日志和证人。"
+    },
+    {
+      "id": "fact_alibi_zhao",
+      "type": "alibi",
+      "statement": "赵会计在案发时间在办公室核对账目，有监控记录。"
+    },
+    {
+      "id": "fact_alibi_sun",
+      "type": "alibi",
+      "statement": "孙维修在案发时间在锅炉房检修，有工作记录。"
+    },
+    {
+      "id": "fact_alibi_zhou",
+      "type": "alibi",
+      "statement": "周前台在案发时间在前台值班，有监控记录。"
+    }
+  ],
+  "timeline": [
+    {
+      "id": "event_murder",
+      "timestamp": "2025-05-18T18:30:00+08:00",
+      "sceneId": "scene_study",
+      "characterIds": [
+        "character_victim",
+        "character_culprit"
+      ],
+      "factIds": [
+        "fact_method_blunt",
+        "fact_opportunity_lin"
+      ],
+      "description": "林经理在书房用铜制镇纸击打陈老板头部，致其死亡。"
+    },
+    {
+      "id": "event_wu_saw",
+      "timestamp": "2025-05-18T18:32:00+08:00",
+      "sceneId": "scene_study",
+      "characterIds": [
+        "character_witness_1",
+        "character_culprit"
+      ],
+      "factIds": [
+        "fact_opportunity_lin"
+      ],
+      "description": "吴保洁在走廊看到林经理从书房方向走出，神色慌张。"
+    },
+    {
+      "id": "event_zheng_heard",
+      "timestamp": "2025-05-18T18:30:00+08:00",
+      "sceneId": "scene_study",
+      "characterIds": [
+        "character_witness_2"
+      ],
+      "factIds": [
+        "fact_method_blunt"
+      ],
+      "description": "郑住客听到书房方向有争吵声和重物倒地声。"
+    }
+  ],
+  "claims": [
+    {
+      "id": "claim_lin_alibi",
+      "speakerId": "character_culprit",
+      "kind": "lie",
+      "statement": "案发时我在自己房间处理邮件，没有去过书房。",
+      "factIds": []
+    },
+    {
+      "id": "claim_wang_alibi",
+      "speakerId": "character_suspect_2",
+      "kind": "truth",
+      "statement": "案发时我在厨房准备晚餐，没有离开过。",
+      "factIds": [
+        "fact_alibi_wang"
+      ]
+    },
+    {
+      "id": "claim_zhao_alibi",
+      "speakerId": "character_suspect_3",
+      "kind": "truth",
+      "statement": "案发时我在办公室核对账目，没有离开过。",
+      "factIds": [
+        "fact_alibi_zhao"
+      ]
+    },
+    {
+      "id": "claim_sun_alibi",
+      "speakerId": "character_suspect_4",
+      "kind": "truth",
+      "statement": "案发时我在锅炉房检修设备，没有离开过。",
+      "factIds": [
+        "fact_alibi_sun"
+      ]
+    },
+    {
+      "id": "claim_zhou_alibi",
+      "speakerId": "character_suspect_5",
+      "kind": "truth",
+      "statement": "案发时我在前台值班，没有离开过。",
+      "factIds": [
+        "fact_alibi_zhou"
+      ]
+    },
+    {
+      "id": "claim_wu_saw_lin",
+      "speakerId": "character_witness_1",
+      "kind": "truth",
+      "statement": "我看到林经理从书房方向走出来，神色慌张。",
+      "factIds": [
+        "fact_opportunity_lin"
+      ]
+    },
+    {
+      "id": "claim_zheng_heard",
+      "speakerId": "character_witness_2",
+      "kind": "truth",
+      "statement": "我听到书房方向有争吵声和重物倒地声。",
+      "factIds": [
+        "fact_method_blunt"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence_body_wound",
+      "name": "尸体伤口",
+      "description": "死者头部有多处钝器伤，法医远程初步判断为钝器多次击打所致。",
+      "kind": "forensic",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_study",
+        "objectId": "object_body",
+        "actionAliases": [
+          "检查尸体",
+          "查看伤口"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_paperweight",
+      "name": "铜制镇纸",
+      "description": "书房书桌上的铜制镇纸，沾有血迹，与伤口形状吻合。",
+      "kind": "physical",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_study",
+        "objectId": "object_body",
+        "actionAliases": [
+          "查看镇纸",
+          "检查凶器"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_scattered_files",
+      "name": "散落文件",
+      "description": "书桌抽屉被拉开，文件散落，其中有旅馆财务报表和员工薪资记录。",
+      "kind": "document",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "search",
+        "sceneId": "scene_study",
+        "objectId": "object_desk",
+        "actionAliases": [
+          "翻阅文件",
+          "查看散落文件"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_locked_phone",
+      "name": "死者手机",
+      "description": "死者手机，屏幕锁定，需要密码或技术手段解锁。",
+      "kind": "digital",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "inspect",
+        "sceneId": "scene_study",
+        "objectId": "object_phone",
+        "actionAliases": [
+          "查看手机",
+          "尝试解锁"
+        ],
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_lin_testimony",
+      "name": "林经理的陈述",
+      "description": "林经理声称案发时在自己房间处理邮件，但无法提供邮件记录，且其手机定位显示案发时在书房附近。",
+      "kind": "testimony",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [
+        "claim_lin_alibi"
+      ],
+      "implicatesCharacterIds": [
+        "character_culprit"
+      ],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_study",
+        "characterId": "character_culprit",
+        "actionAliases": [
+          "询问林经理",
+          "与林经理谈话"
+        ],
+        "dialogueAliases": [
+          "你案发时在哪里？",
+          "有人看到你在书房附近，你怎么解释？",
+          "你的手机定位显示你在书房，怎么回事？"
+        ],
+        "dialogueUtterance": "我一直在房间处理邮件，没去过书房。手机定位可能不准。",
+        "prerequisiteEvidenceIds": [
+          "evidence_locked_phone"
+        ]
+      }
+    },
+    {
+      "id": "evidence_lin_phone",
+      "name": "林经理手机定位",
+      "description": "技术部门远程调取林经理手机定位，显示案发时间其手机在书房附近。",
+      "kind": "digital",
+      "supportsFactIds": [
+        "fact_opportunity_lin"
+      ],
+      "contradictsClaimIds": [
+        "claim_lin_alibi"
+      ],
+      "implicatesCharacterIds": [
+        "character_culprit"
+      ],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "query",
+        "sceneId": "scene_study",
+        "objectId": "object_phone",
+        "actionAliases": [
+          "调取手机定位",
+          "查询林经理手机位置"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_lin_testimony"
+        ]
+      }
+    },
+    {
+      "id": "evidence_lin_contract",
+      "name": "林经理劳动合同",
+      "description": "林经理的劳动合同显示其年终奖被克扣，且近期有解雇警告。",
+      "kind": "document",
+      "supportsFactIds": [
+        "fact_motive_lin"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [
+        "character_culprit"
+      ],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "search",
+        "sceneId": "scene_office",
+        "objectId": "object_contract",
+        "actionAliases": [
+          "查看合同",
+          "翻阅文件"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_scattered_files"
+        ]
+      }
+    },
+    {
+      "id": "evidence_wu_testimony",
+      "name": "吴保洁的证词",
+      "description": "吴保洁称案发时间前后看到林经理从书房方向走出，神色慌张。",
+      "kind": "testimony",
+      "supportsFactIds": [
+        "fact_opportunity_lin"
+      ],
+      "contradictsClaimIds": [
+        "claim_lin_alibi"
+      ],
+      "implicatesCharacterIds": [
+        "character_culprit"
+      ],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_study",
+        "characterId": "character_witness_1",
+        "actionAliases": [
+          "询问吴保洁",
+          "与吴保洁谈话"
+        ],
+        "dialogueAliases": [
+          "你看到谁从书房出来？",
+          "案发时你在哪里？",
+          "有没有看到可疑的人？"
+        ],
+        "dialogueUtterance": "我看到林经理从书房那边出来，走得很快，脸色很难看。",
+        "prerequisiteEvidenceIds": [
+          "evidence_body_wound"
+        ]
+      }
+    },
+    {
+      "id": "evidence_zheng_testimony",
+      "name": "郑住客的证词",
+      "description": "郑住客称听到书房方向有争吵声和重物倒地声，时间与案发时间吻合。",
+      "kind": "testimony",
+      "supportsFactIds": [
+        "fact_method_blunt"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": true,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_study",
+        "characterId": "character_witness_2",
+        "actionAliases": [
+          "询问郑住客",
+          "与郑住客谈话"
+        ],
+        "dialogueAliases": [
+          "你听到什么声音？",
+          "案发时你在房间吗？",
+          "有没有听到争吵？"
+        ],
+        "dialogueUtterance": "我听到书房那边有争吵声，然后砰的一声，像是什么倒了。",
+        "prerequisiteEvidenceIds": [
+          "evidence_body_wound"
+        ]
+      }
+    },
+    {
+      "id": "evidence_kitchen_log",
+      "name": "厨房工作日志",
+      "description": "厨房工作日志显示王厨师在案发时间正在准备晚餐，且有帮厨确认。",
+      "kind": "document",
+      "supportsFactIds": [
+        "fact_alibi_wang"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [
+        "character_suspect_2"
+      ],
+      "critical": false,
+      "discovery": {
+        "method": "search",
+        "sceneId": "scene_kitchen",
+        "objectId": "object_kitchen_log",
+        "actionAliases": [
+          "查看日志",
+          "翻阅记录"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_wang_testimony"
+        ]
+      }
+    },
+    {
+      "id": "evidence_wang_testimony",
+      "name": "王厨师的陈述",
+      "description": "王厨师声称案发时在厨房准备晚餐，并提供了帮厨的联系方式。",
+      "kind": "testimony",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_kitchen",
+        "characterId": "character_suspect_2",
+        "actionAliases": [
+          "询问王厨师",
+          "与王厨师谈话"
+        ],
+        "dialogueAliases": [
+          "你案发时在哪里？",
+          "有人能证明你在厨房吗？",
+          "晚餐准备得怎么样？"
+        ],
+        "dialogueUtterance": "我一直在厨房备餐，帮厨可以作证。",
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_office_cctv",
+      "name": "办公室监控录像",
+      "description": "办公室门口监控显示赵会计在案发时间一直在办公室内。",
+      "kind": "digital",
+      "supportsFactIds": [
+        "fact_alibi_zhao"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [
+        "character_suspect_3"
+      ],
+      "critical": false,
+      "discovery": {
+        "method": "query",
+        "sceneId": "scene_office",
+        "objectId": "object_office_cctv",
+        "actionAliases": [
+          "查看监控",
+          "回放录像"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_zhao_testimony"
+        ]
+      }
+    },
+    {
+      "id": "evidence_zhao_testimony",
+      "name": "赵会计的陈述",
+      "description": "赵会计声称案发时在办公室核对账目，并提到办公室门口有监控。",
+      "kind": "testimony",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_office",
+        "characterId": "character_suspect_3",
+        "actionAliases": [
+          "询问赵会计",
+          "与赵会计谈话"
+        ],
+        "dialogueAliases": [
+          "你案发时在哪里？",
+          "有人能证明你在办公室吗？",
+          "办公室有监控吗？"
+        ],
+        "dialogueUtterance": "我在办公室对账，门口有监控可以查。",
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_boiler_log",
+      "name": "锅炉检修记录",
+      "description": "锅炉检修记录显示孙维修在案发时间正在锅炉房检修设备。",
+      "kind": "document",
+      "supportsFactIds": [
+        "fact_alibi_sun"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [
+        "character_suspect_4"
+      ],
+      "critical": false,
+      "discovery": {
+        "method": "search",
+        "sceneId": "scene_boiler_room",
+        "objectId": "object_boiler_log",
+        "actionAliases": [
+          "查看记录",
+          "翻阅检修日志"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_sun_testimony"
+        ]
+      }
+    },
+    {
+      "id": "evidence_sun_testimony",
+      "name": "孙维修的陈述",
+      "description": "孙维修声称案发时在锅炉房检修设备，并提到有检修记录。",
+      "kind": "testimony",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_boiler_room",
+        "characterId": "character_suspect_4",
+        "actionAliases": [
+          "询问孙维修",
+          "与孙维修谈话"
+        ],
+        "dialogueAliases": [
+          "你案发时在哪里？",
+          "有人能证明你在锅炉房吗？",
+          "锅炉房有记录吗？"
+        ],
+        "dialogueUtterance": "我在锅炉房检修，有记录可查。",
+        "prerequisiteEvidenceIds": []
+      }
+    },
+    {
+      "id": "evidence_front_cctv",
+      "name": "前台监控录像",
+      "description": "前台监控显示周前台在案发时间一直在前台值班。",
+      "kind": "digital",
+      "supportsFactIds": [
+        "fact_alibi_zhou"
+      ],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [
+        "character_suspect_5"
+      ],
+      "critical": false,
+      "discovery": {
+        "method": "query",
+        "sceneId": "scene_front_desk",
+        "objectId": "object_front_cctv",
+        "actionAliases": [
+          "查看监控",
+          "回放录像"
+        ],
+        "prerequisiteEvidenceIds": [
+          "evidence_zhou_testimony"
+        ]
+      }
+    },
+    {
+      "id": "evidence_zhou_testimony",
+      "name": "周前台的陈述",
+      "description": "周前台声称案发时在前台值班，并提到前台有监控。",
+      "kind": "testimony",
+      "supportsFactIds": [],
+      "contradictsClaimIds": [],
+      "implicatesCharacterIds": [],
+      "excludesCharacterIds": [],
+      "critical": false,
+      "discovery": {
+        "method": "interview",
+        "sceneId": "scene_front_desk",
+        "characterId": "character_suspect_5",
+        "actionAliases": [
+          "询问周前台",
+          "与周前台谈话"
+        ],
+        "dialogueAliases": [
+          "你案发时在哪里？",
+          "有人能证明你在前台吗？",
+          "前台有监控吗？"
+        ],
+        "dialogueUtterance": "我在前台值班，监控可以证明。",
+        "prerequisiteEvidenceIds": []
+      }
+    }
+  ],
+  "unlockRules": [
+    {
+      "id": "unlock_kitchen",
+      "targetType": "scene",
+      "targetId": "scene_kitchen",
+      "allEvidenceIds": [],
+      "anyEvidenceIds": [
+        "evidence_scattered_files"
+      ]
+    },
+    {
+      "id": "unlock_office",
+      "targetType": "scene",
+      "targetId": "scene_office",
+      "allEvidenceIds": [],
+      "anyEvidenceIds": [
+        "evidence_scattered_files"
+      ]
+    },
+    {
+      "id": "unlock_boiler_room",
+      "targetType": "scene",
+      "targetId": "scene_boiler_room",
+      "allEvidenceIds": [],
+      "anyEvidenceIds": [
+        "evidence_scattered_files"
+      ]
+    },
+    {
+      "id": "unlock_front_desk",
+      "targetType": "scene",
+      "targetId": "scene_front_desk",
+      "allEvidenceIds": [],
+      "anyEvidenceIds": [
+        "evidence_scattered_files"
+      ]
+    },
+    {
+      "id": "unlock_lin_phone",
+      "targetType": "evidence",
+      "targetId": "evidence_lin_phone",
+      "allEvidenceIds": [
+        "evidence_lin_testimony"
+      ],
+      "anyEvidenceIds": []
+    },
+    {
+      "id": "unlock_lin_contract",
+      "targetType": "evidence",
+      "targetId": "evidence_lin_contract",
+      "allEvidenceIds": [
+        "evidence_scattered_files"
+      ],
+      "anyEvidenceIds": []
+    }
+  ],
+  "hintChains": [
+    {
+      "id": "hint_motive",
+      "targetFactId": "fact_motive_lin",
+      "hints": [
+        "散落文件中有员工薪资记录，或许有人对薪资不满。",
+        "查看林经理的劳动合同，可能有克扣年终奖的条款。",
+        "林经理的合同显示年终奖被克扣且有解雇警告，这可能是动机。"
+      ]
+    },
+    {
+      "id": "hint_method",
+      "targetFactId": "fact_method_blunt",
+      "hints": [
+        "尸体头部有钝器伤，凶器可能是书房内的重物。",
+        "铜制镇纸沾有血迹，与伤口形状吻合。",
+        "郑住客听到争吵和重物倒地声，支持镇纸击打的说法。"
+      ]
+    },
+    {
+      "id": "hint_opportunity",
+      "targetFactId": "fact_opportunity_lin",
+      "hints": [
+        "有人看到林经理从书房方向出来，神色慌张。",
+        "林经理声称在房间处理邮件，但手机定位显示在书房附近。",
+        "吴保洁的证词和手机定位共同证明林经理在案发时间出现在书房。"
+      ]
+    }
+  ],
+  "solution": {
+    "culpritId": "character_culprit",
+    "motiveFactId": "fact_motive_lin",
+    "methodFactId": "fact_method_blunt",
+    "requiredEvidenceIds": [
+      "evidence_body_wound",
+      "evidence_paperweight",
+      "evidence_lin_contract",
+      "evidence_lin_phone",
+      "evidence_wu_testimony",
+      "evidence_zheng_testimony",
+      "evidence_kitchen_log",
+      "evidence_office_cctv",
+      "evidence_boiler_log",
+      "evidence_front_cctv"
+    ],
+    "requiredTimelineEventIds": [
+      "event_murder",
+      "event_wu_saw",
+      "event_zheng_heard"
+    ]
+  }
+}

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireAccess } from "@/server/access";
 import { HttpError, jsonError } from "@/server/http-error";
+import { createPlayerProtocol } from "@/server/player-protocol";
 import { requireAnonymousPlayer } from "@/server/player-session";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getServerServices } from "@/server/services";
@@ -83,36 +84,39 @@ export async function POST(
     enforceRateLimit("game-action:global", { limit: 1_500, windowMs: 60_000 });
     enforceRateLimit(`game-action:${playerId}`, { limit: 240, windowMs: 60_000 });
     const { sessionId } = await context.params;
-    const input = actionSchema.parse(await request.json());
+    const parsedInput = actionSchema.parse(await request.json());
+    const game = await services.repository.loadGame(playerId, sessionId);
+    const protocol = createPlayerProtocol(game.caseArtifact, game.session, await services.repository.getPlayerProtocolKey());
+    const input = protocol.decodeCommand(parsedInput);
 
     if (input.type === "investigate") {
       return NextResponse.json(
-        await services.game.investigate({ playerId, sessionId, ...input }),
+        protocol.encode(await services.game.investigate({ playerId, sessionId, ...input })),
       );
     }
     if (input.type === "hint") {
       return NextResponse.json(
-        await services.game.useHint({ playerId, sessionId, ...input }),
+        protocol.encode(await services.game.useHint({ playerId, sessionId, ...input })),
       );
     }
     if (input.type === "present_evidence") {
       return NextResponse.json(
-        await services.game.showEvidence({ playerId, sessionId, ...input }),
+        protocol.encode(await services.game.showEvidence({ playerId, sessionId, ...input })),
       );
     }
     if (input.type === "submit_report") {
       return NextResponse.json(
-        await services.game.submitReport({ playerId, sessionId, ...input }),
+        protocol.encode(await services.game.submitReport({ playerId, sessionId, ...input })),
       );
     }
     if (input.type === "start_confrontation") {
       return NextResponse.json(
-        await services.game.startConfrontation({ playerId, sessionId, ...input }),
+        protocol.encode(await services.game.startConfrontation({ playerId, sessionId, ...input })),
       );
     }
     if (input.type === "resolve_confrontation") {
       return NextResponse.json(
-        await services.game.resolveConfrontation({ playerId, sessionId, ...input }),
+        protocol.encode(await services.game.resolveConfrontation({ playerId, sessionId, ...input })),
       );
     }
     throw new HttpError(400, "unknown_action", "未知行动。");

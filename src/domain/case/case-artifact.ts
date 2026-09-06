@@ -209,7 +209,7 @@ const characterPatchSchema = characterSchema
   .partial()
   .extend({ id: entityIdSchema })
   .strict();
-const scenePatchSchema = sceneSchema;
+const scenePatchSchema = sceneSchema.partial().extend({ id: entityIdSchema }).strict();
 const sceneObjectPatchSchema = sceneObjectSchema
   .partial()
   .extend({ sceneId: entityIdSchema, id: entityIdSchema })
@@ -222,7 +222,10 @@ const timelinePatchSchema = timelineEventSchema
 const claimPatchSchema = claimSchema.partial().extend({ id: entityIdSchema }).strict();
 const evidencePatchSchema = evidenceSchema
   .partial()
-  .extend({ id: entityIdSchema })
+  .extend({
+    id: entityIdSchema,
+    discovery: evidenceDiscoverySchema.partial().optional(),
+  })
   .strict();
 const unlockRulePatchSchema = unlockRuleSchema
   .partial()
@@ -240,9 +243,8 @@ export const caseArtifactRepairPatchSchema = z
     setting: settingSchema.optional(),
     victimId: entityIdSchema.optional(),
     culpritId: entityIdSchema.optional(),
-    characters: z.array(characterPatchSchema).max(4).optional(),
-    // 局部修复也需要能纠正“生成过多配角”。严格限制为已有的 witness/referenced，
-    // 防止修复模型意外删掉受害者或嫌疑人而把案件结构整体打散。
+    characters: z.array(characterPatchSchema).max(9).optional(),
+    // 人数修复可移除非核心角色；受害者与真凶身份必须保留，引用由发布门禁复查。
     removeCharacterIds: entityIdListSchema
       .max(4)
       .refine((ids) => new Set(ids).size === ids.length, {
@@ -251,10 +253,10 @@ export const caseArtifactRepairPatchSchema = z
       .optional(),
     scenes: z.array(scenePatchSchema).max(4).optional(),
     sceneObjects: z.array(sceneObjectPatchSchema).max(8).optional(),
-    facts: z.array(factPatchSchema).max(8).optional(),
+    facts: z.array(factPatchSchema).max(24).optional(),
     timeline: z.array(timelinePatchSchema).max(8).optional(),
     claims: z.array(claimPatchSchema).max(8).optional(),
-    evidence: z.array(evidencePatchSchema).max(8).optional(),
+    evidence: z.array(evidencePatchSchema).max(24).optional(),
     unlockRules: z.array(unlockRulePatchSchema).max(8).optional(),
     hintChains: z.array(hintChainPatchSchema).max(8).optional(),
     solution: solutionSchema.partial().strict().optional(),
@@ -273,6 +275,15 @@ export function applyCaseArtifactRepairPatch(
   patch: CaseArtifactRepairPatch,
 ): CaseArtifact {
   const characters = applyCharacterPatches(caseArtifact, patch);
+  const evidencePatches = patch.evidence?.map(({ discovery, ...evidence }) => ({
+    ...evidence,
+    ...(discovery ? {
+      discovery: {
+        ...caseArtifact.evidence.find((item) => item.id === evidence.id)?.discovery,
+        ...discovery,
+      } as CaseArtifact["evidence"][number]["discovery"],
+    } : {}),
+  }));
 
   return caseArtifactSchema.parse({
     ...caseArtifact,
@@ -289,7 +300,7 @@ export function applyCaseArtifactRepairPatch(
     facts: mergeRecordsById(caseArtifact.facts, patch.facts),
     timeline: mergeRecordsById(caseArtifact.timeline, patch.timeline),
     claims: mergeRecordsById(caseArtifact.claims, patch.claims),
-    evidence: mergeRecordsById(caseArtifact.evidence, patch.evidence),
+    evidence: mergeRecordsById(caseArtifact.evidence, evidencePatches),
     unlockRules: mergeRecordsById(caseArtifact.unlockRules, patch.unlockRules),
     hintChains: mergeRecordsById(caseArtifact.hintChains, patch.hintChains),
     solution: patch.solution
@@ -312,11 +323,12 @@ function applyCharacterPatches(
   );
   const invalidRemovalIds = [...removedCharacterIds].filter((characterId) => {
     const character = charactersById.get(characterId);
-    return !character || (character.roleTier !== "witness" && character.roleTier !== "referenced");
+    return !character || character.roleTier === "victim" ||
+      characterId === caseArtifact.victimId || characterId === caseArtifact.culpritId;
   });
   if (invalidRemovalIds.length > 0) {
     throw new Error(
-      `repair patches can only remove existing supporting characters: ${invalidRemovalIds.join(", ")}`,
+      `repair patches cannot remove missing characters, the victim or the culprit: ${invalidRemovalIds.join(", ")}`,
     );
   }
 

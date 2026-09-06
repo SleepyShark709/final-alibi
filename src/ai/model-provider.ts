@@ -114,8 +114,11 @@ export interface StructuredModelRequest<T extends Record<string, unknown>> {
   schema: z.ZodType<T>;
   schemaName: string;
   messages: ModelMessage[];
+  reasoning?: boolean;
+  reasoningEffort?: "low" | "high";
   temperature?: number;
   maxTokens?: number;
+  maxRetries?: number;
   signal?: AbortSignal;
 }
 

@@ -25,10 +25,15 @@ async function main() {
   try {
     for (let index = 1; index <= count; index += 1) {
       const seed = `live-audit-${Date.now()}-${index}`;
+      const startedAt = Date.now();
       const result = await services.generation.generateNow({
         seed,
         theme: themes[(index - 1) % themes.length]!,
         difficulty: index % 3 === 0 ? "hard" : "standard",
+      }, undefined, {
+        onProgress: ({ stage, progress }) => {
+          console.log(`[live-audit] ${index}/${count} ${stage} ${progress}% (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+        },
       });
       const validation = validatePublishableCaseArtifact(result.caseArtifact);
       if (!validation.valid) {

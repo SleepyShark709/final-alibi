@@ -41,6 +41,10 @@ export const dialogueGuardSchema = z
       ]),
     ),
     feedback: z.string().trim().max(1_000),
+    groundingChecks: z.array(z.object({
+      candidateText: z.string().trim().min(1).max(800),
+      sourceText: z.string().trim().min(1).max(4_000),
+    }).strict()).max(16).optional(),
   })
   .strict();
 

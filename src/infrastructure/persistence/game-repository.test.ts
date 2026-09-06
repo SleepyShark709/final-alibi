@@ -90,8 +90,8 @@ describe("GameRepository", () => {
       now: "2026-08-31T10:00:00+08:00",
     });
     const request = {
-      commandId: "command_find_memo",
-      text: "检查碎纸篓",
+      commandId: "command_find_watch",
+      text: "检查腕表",
       sceneId: "scene_study",
       now: "2026-08-31T10:01:00+08:00",
     };
@@ -187,7 +187,7 @@ describe("GameRepository", () => {
 
     const cases = await repository.listReadyCases();
     expect(cases.filter((caseItem) => caseItem.source === "tutorial")).toEqual([
-      expect.objectContaining({ id: "case_rainy_study_v3", title: "雨夜书房" }),
+      expect.objectContaining({ id: tutorialCase.id, title: "雨夜书房" }),
     ]);
   });
 
@@ -204,7 +204,7 @@ describe("GameRepository", () => {
     const lobby = await new GameService(repository).getLobby(player.playerId);
 
     expect(lobby.cases.filter((caseItem) => caseItem.source === "tutorial")).toEqual([
-      expect.objectContaining({ id: "case_rainy_study_v3", title: "雨夜书房" }),
+      expect.objectContaining({ id: tutorialCase.id, title: "雨夜书房" }),
     ]);
     await expect(repository.getReadyCase("case_rainy_study")).resolves.toMatchObject({
       id: "case_rainy_study",
